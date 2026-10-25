@@ -550,7 +550,7 @@ function tuneChart(box, T) {
 function configDiff(st) {
   const b = st.base?.options || {}, t = st.best?.options || {};
   const keys = Object.keys(t).filter(k => t[k] !== b[k]);
-  if (!keys.length) return empty("🟰", "No changes from stock yet.");
+  if (!keys.length) return empty("⚖️", "No changes from stock yet.");
   return `<div class="table-wrap"><table><thead><tr><th>Parameter</th><th class="num">Stock</th><th class="num">Tuned</th></tr></thead><tbody>
     ${keys.map(k => `<tr><td><code>${esc(k)}</code></td><td class="num muted">${esc(fmtVal(b[k]))}</td><td class="num"><b>${esc(fmtVal(t[k]))}</b></td></tr>`).join("")}</tbody></table></div>`;
 }
