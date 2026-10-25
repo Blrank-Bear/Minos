@@ -4,7 +4,9 @@
 Wraps neurons.miner._run_and_score (template run + hap.py + AdvancedScorer)
 with what the stock --score path lacks for tuning:
 
-  * the region is inferred from the round's truth VCF (rounds don't publish it),
+  * the region comes from meta.json (scripts/fetch_round_meta.py), falling back
+    to the truth VCF's extent when the round has no metadata,
+  * the score is placed on the round's real leaderboard when meta.json has it,
   * the scoring version is set explicitly (default v2, the live one),
   * the thread count is set explicitly, to mimic a small validator (2-8).
 
@@ -14,6 +16,7 @@ Usage (inside WSL, from the project root):
 """
 import argparse
 import gzip
+import json
 import os
 import sys
 import time
@@ -48,6 +51,20 @@ def infer_region(truth_vcf: Path) -> str:
     return f"{chrom}:{max(1, lo - REGION_PAD)}-{hi + REGION_PAD}"
 
 
+def load_meta(round_dir: Path) -> dict:
+    p = round_dir / "meta.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def placement(score: float, leaderboard: list) -> str:
+    scores = sorted((e["combined_final"] for e in leaderboard if e.get("combined_final") is not None), reverse=True)
+    if not scores:
+        return "no leaderboard"
+    rank = 1 + sum(1 for s in scores if s > score)
+    return (f"would rank {rank} of {len(scores) + 1} | #1={scores[0]:.6f} "
+            f"gap={score - scores[0]:+.6f} | median={scores[len(scores) // 2]:.6f}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("round_dir", type=Path)
@@ -68,7 +85,8 @@ def main() -> int:
             print(f"missing {p}", file=sys.stderr)
             return 2
 
-    region = args.region or infer_region(truth)
+    meta = load_meta(rd)
+    region = args.region or meta.get("region") or infer_region(truth)
     chrom = region.split(":")[0]
     ref = REPO / "datasets" / "reference" / chrom / f"{chrom}.fa"
     if not ref.exists():
@@ -93,6 +111,8 @@ def main() -> int:
         scoring_version=args.scoring_version,
     )
     print(f"RESULT round={rd.name} score={score} total_seconds={time.time() - t0:.0f}", flush=True)
+    if score is not None and meta.get("leaderboard"):
+        print(f"PLACEMENT round={rd.name} {placement(score, meta['leaderboard'])}", flush=True)
     return 0 if score is not None else 1
 
 
