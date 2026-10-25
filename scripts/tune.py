@@ -220,7 +220,8 @@ class Tuner:
         rounds = self.args.screen_rounds
         configs = [{"param": None, "value": None, "opts": base_opts, "label": "screen-base"}]
         for param, values in SCREEN:
-            for v in values:
+            values = list(values) + self.neighbours(param, base_opts.get(param, self.defs[param]["default"]))
+            for v in dict.fromkeys(values):
                 v = typed(self.defs, param, v) if self.defs[param]["type"] in ("int", "float") else v
                 if v == base_opts.get(param, self.defs[param]["default"]):
                     continue
@@ -341,6 +342,26 @@ class Tuner:
             "mean_core": mean([r["breakdown"].get("core") for r in ok if r.get("breakdown", {}).get("core") is not None]),
             "mean_germline": mean([r["breakdown"].get("germline") for r in ok if r.get("breakdown", {}).get("germline") is not None]),
         }
+
+    def neighbours(self, param, current):
+        """Fine-tuning values around an already-tuned setting (none for untouched ones).
+
+        ints: current +-1, +-2; floats: current x0.85, x1.15, x0.7, x1.3; clamped to range.
+        """
+        d = self.defs[param]
+        if d["type"] not in ("int", "float") or current == d["default"]:
+            return []
+        if d["type"] == "int":
+            cands = [current + k for k in (-2, -1, 1, 2)]
+        else:
+            cands = [round(current * f, 10) for f in (0.7, 0.85, 1.15, 1.3)]
+        out = []
+        for c in cands:
+            c = min(d["max"], max(d["min"], c))
+            c = int(c) if d["type"] == "int" else float(c)
+            if c != current and c not in out:
+                out.append(c)
+        return out
 
     def deploy(self):
         """Make the best config the live miner config (what a registered miner submits)."""
