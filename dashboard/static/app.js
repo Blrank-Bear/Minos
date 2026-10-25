@@ -585,8 +585,33 @@ function autopilotCard(a) {
         <td class="num">${x.delta == null ? "⏳" : sgn(x.delta)}</td><td class="num">${sgn(x.mean_gap)}</td>
         <td class="muted" style="font-size:12px">${esc(Object.entries(x.changes || {}).map(([k, v]) => `${k}=${fmtVal(v)}`).join(", ") || "—")}</td></tr>`).join("")}
     </tbody></table></div>` : ""}
-    ${hist.length ? `<div class="muted" style="margin-top:10px;font-size:12.5px">${hist.slice(0, 6).map(h => `#${h.iteration}: ${h.accepted ? "✅ accepted " + esc(h.winner) + " " + sgn(h.winner_gap) : h.confirmed?.length ? "❌ confirmed " + h.confirmed.length + ", none better" : "➖ no positive mutation"}`).join(" · ")}</div>` : ""}
+    ${hist.length ? `<div class="muted" style="margin-top:10px;font-size:12.5px">${hist.slice(0, 6).map(h => `#${h.iteration}: ${h.accepted ? "✅ accepted " + esc(h.winner) + " " + sgn(h.winner_gap) : h.confirmed?.length ? "❌ confirmed " + h.confirmed.length + ", none better" : "➖ no positive change"}`).join(" · ")}</div>` : ""}
+    ${fullCheck(a.full_check)}
+    ${testLog(a.log)}
   </div>`;
+}
+function fullCheck(c) {
+  if (!c) return "";
+  return `<div style="margin-top:14px"><h3 style="margin-bottom:6px">🩺 Full-system check · ${esc(c.when)} · ${ago(c.ts)}</h3>
+    <div class="row" style="margin-bottom:6px"><span class="chip">best ${esc(c.best)}</span><span class="chip">gap ${sgn(c.mean_gap)}</span>
+      <span class="chip">FP ${c.fp} · missed ${c.fn} (8 rounds)</span><span class="chip">dominant: ${esc(c.dominant_error)}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Class</th><th class="num">Weight</th><th class="num">F1</th><th class="num">Weighted loss</th><th class="num">FP</th><th class="num">Missed</th><th>Main error</th></tr></thead><tbody>
+    ${(c.by_class || []).map(x => `<tr><td><code>${esc(x.class)}</code></td><td class="num">${x.weight}</td><td class="num">${f4(x.f1)}</td>
+      <td class="num">${f4(x.weighted_loss)}</td><td class="num">${x.fp}</td><td class="num">${x.fn}</td><td>${x.fp_share > 0.5 ? "false positives" : "missed variants"}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
+}
+function testLog(log) {
+  const rows = (log || []).filter(e => e.kind === "confirm" || e.kind === "screen" || e.kind === "iteration").slice(0, 40);
+  if (!rows.length) return "";
+  return `<div style="margin-top:14px"><h3 style="margin-bottom:6px">📝 Test log · one change per test · newest first</h3>
+    <div class="table-wrap" style="max-height:360px;overflow:auto"><table><thead><tr><th>When</th><th>Stage</th><th>Change</th><th class="num">Expected Δ</th><th class="num">Actual Δ (8 rounds)</th><th class="num">FP / missed Δ</th><th></th></tr></thead><tbody>
+    ${rows.map(e => e.kind === "iteration" ? `<tr><td class="muted">${ago(e.ts)}</td><td>iteration ${e.iteration}</td><td colspan="5" class="muted">${esc(e.result)}</td></tr>` :
+      `<tr><td class="muted">${ago(e.ts)}</td><td>${e.kind === "confirm" ? "🔬 confirm" : "🔎 screen"}</td>
+       <td><code>${esc(e.param)}</code> ${esc(fmtVal(e.old))} → <b>${esc(fmtVal(e.new))}</b></td>
+       <td class="num">${sgn(e.expected_delta)}</td><td class="num">${e.kind === "confirm" ? sgn(e.actual_gap_delta) : ""}</td>
+       <td class="num">${e.kind === "confirm" ? `${e.fp_delta >= 0 ? "+" : ""}${e.fp_delta} / ${e.fn_delta >= 0 ? "+" : ""}${e.fn_delta}` : ""}</td>
+       <td>${e.kind === "confirm" ? (e.matched_expectation ? "✅ as expected" : "⚠️ differs") : ""}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
 }
 function validationCard(v) {
   if (!v || !v.configs) return "";

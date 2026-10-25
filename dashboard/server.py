@@ -527,6 +527,7 @@ def tune_data():
     events = read_jsonl(TUNE_EVENTS)[-300:]
     autopilot = read_json(TUNE / "autopilot.json", {}) or {}
     autopilot["alive"] = pid_alive(autopilot.get("pid")) if autopilot else False
+    autopilot["log"] = list(reversed(read_jsonl(TUNE / "autopilot_log.jsonl")[-120:]))
     if autopilot.get("status") in ("running", "starting", "stopping") and not autopilot["alive"]:
         autopilot["status"] = "dead"
     validation = read_json(TUNE / "validation.json", {}) or {}
