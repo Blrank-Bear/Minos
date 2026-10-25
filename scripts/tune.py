@@ -209,7 +209,7 @@ class Tuner:
                     r = json.loads(line)
                 except ValueError:
                     continue
-                if r.get("config_hash") == chash and r.get("round") in rounds and r.get("ok"):
+                if r.get("config_hash") == chash and r.get("round") in rounds and r.get("ok") and not r.get("subregion"):
                     out[r["round"]] = r
         return out
 

@@ -121,6 +121,11 @@ def main() -> int:
 
     meta = load_meta(rd)
     region = args.region or meta.get("region") or infer_region(truth)
+    # A custom --region is a slice of the round: its score is not comparable
+    # with the round's leaderboard, so it is recorded as a subregion result.
+    subregion = bool(args.region and meta.get("region") and args.region != meta.get("region"))
+    if subregion:
+        meta = {k: v for k, v in meta.items() if k != "leaderboard"}
     chrom = region.split(":")[0]
     ref = REPO / "datasets" / "reference" / chrom / f"{chrom}.fa"
     if not ref.exists():
@@ -233,6 +238,7 @@ def main() -> int:
             "round": rd.name,
             "round_id": meta.get("round_id"),
             "region": region,
+            "subregion": subregion,
             "chromosome": chrom,
             "threads": args.threads,
             "scoring_version": args.scoring_version,

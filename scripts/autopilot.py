@@ -33,8 +33,25 @@ import random_search  # noqa: E402
 import tune  # noqa: E402
 
 STATE = tune.TUNE / "autopilot.json"
-SCREEN_ROUNDS = ["20261024T154600Z", "20261024T105800Z", "20261024T121000Z"]
 CONFIRM_TOP = 3
+
+# Screening runs on a SLICE_MB slice of each screening round (GATK time scales
+# with region size, ~3x faster than the full 6-8 Mb). Only paired deltas vs the
+# best on the same slices are used from them; confirmation uses full rounds.
+SCREEN_BASE_ROUNDS = ["20261024T154600Z", "20261024T105800Z", "20261024T121000Z"]
+SLICE_MB = 2
+
+
+def _slice(rd):
+    meta = json.loads((tune.ROUNDS / rd / "meta.json").read_text())
+    chrom, span = meta["region"].split(":")
+    start, end = (int(x) for x in span.split("-"))
+    s = start + 1_000_000
+    return f"{chrom}:{s}-{min(end, s + SLICE_MB * 1_000_000)}"
+
+
+SLICES = {rd: _slice(rd) for rd in SCREEN_BASE_ROUNDS}
+SCREEN_ROUNDS = [f"{rd}@slice" for rd in SCREEN_BASE_ROUNDS]
 
 
 class Autopilot:
@@ -60,25 +77,37 @@ class Autopilot:
             fh.write(json.dumps({"ts": tune.now(), "kind": f"autopilot_{kind}", **kw}) + "\n")
 
     # ---------- running replays ----------
-    def results(self, chash, rounds):
+    def results(self, chash, keys):
+        """Results keyed by round key: '<round>' = full region, '<round>@slice' = SLICE_MB slice."""
         out = {}
+        keys = set(keys)
         if tune.RESULTS.exists():
             for line in tune.RESULTS.read_text().splitlines():
                 try:
                     r = json.loads(line)
                 except ValueError:
                     continue
-                if r.get("config_hash") == chash and r.get("round") in rounds and r.get("ok"):
-                    out[r["round"]] = r
+                if r.get("config_hash") != chash or not r.get("ok"):
+                    continue
+                rd = r.get("round")
+                if r.get("subregion"):
+                    key = f"{rd}@slice"
+                    if key in keys and r.get("region") == SLICES.get(rd):
+                        out[key] = r
+                elif rd in keys:
+                    out[rd] = r
         return out
 
     def run_many(self, items):
-        """items: [(conf_path, label, round)] -> runs the missing ones in parallel."""
-        def one(conf, label, rd):
+        """items: [(conf_path, label, round_key)] -> runs the missing ones in parallel."""
+        def one(conf, label, key):
             if self.stop:
                 return
+            rd, _, sl = key.partition("@")
             cmd = [str(tune.PY), "scripts/score_round.py", str(tune.ROUNDS / rd), "--config", str(conf), "--label", label,
                    "--threads", "2", "--memory-gb", "5"]
+            if sl:
+                cmd += ["--region", SLICES[rd]]
             subprocess.run(cmd, cwd=tune.ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with ThreadPoolExecutor(self.args.workers) as ex:
             futs = [ex.submit(one, *it) for it in items]
@@ -102,7 +131,7 @@ class Autopilot:
                 "mean_rank": mean([r["rank"] for r in rs if r.get("rank")]),
                 "wins": sum(1 for r in rs if r.get("rank") == 1),
                 "max_calling_seconds": max((r.get("calling_seconds") or 0 for r in rs), default=None),
-                "scores": {r["round"]: r["score"] for r in rs}}
+                "scores": {k: have[k]["score"] for k in rounds if k in have}}
 
     def evaluate(self, items_opts, rounds, phase):
         """items_opts: [(label, opts)] -> summaries on `rounds` (runs what's missing)."""

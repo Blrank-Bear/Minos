@@ -200,7 +200,9 @@ def local_rounds():
 
 
 def results():
-    return read_jsonl(RESULTS)
+    # Subregion (slice) replays are screening data, not comparable with the
+    # round leaderboard; keep them out of the replay tables and summaries.
+    return [r for r in read_jsonl(RESULTS) if not r.get("subregion")]
 
 
 def replay_summary(rows):
