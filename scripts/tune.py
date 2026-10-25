@@ -251,6 +251,8 @@ class Tuner:
         with ThreadPoolExecutor(self.args.workers) as ex:
             futs = [ex.submit(self.run_round, c["conf"], c["label"], r) for c, r in tasks]
             for f in as_completed(futs):
+                if f.cancelled():  # cancelled below once a stop was requested
+                    continue
                 f.result()
                 self.state["runs"] += 1
                 refresh()
@@ -282,6 +284,8 @@ class Tuner:
         return sc["plan"]
 
     def run_round(self, conf: Path, label: str, rd: str):
+        if self.stop:  # stopping: don't start queued replays (pool threads pick them up before cancel)
+            return rd, -1
         cmd = [str(PY), "scripts/score_round.py", str(ROUNDS / rd), "--config", str(conf), "--tool", "gatk",
                "--threads", str(self.args.threads), "--memory-gb", str(self.args.memory_gb), "--label", label]
         log = TUNE / "logs" / f"{label}-{rd}.log"
@@ -328,6 +332,25 @@ class Tuner:
             "mean_germline": mean([r["breakdown"].get("germline") for r in ok if r.get("breakdown", {}).get("germline") is not None]),
         }
 
+    def extend(self, param, start, accepted, tried):
+        """Next value beyond `accepted`, moving away from `start`, or None.
+
+        Only when `accepted` is the most extreme value tried in that direction.
+        Step = a third of the distance travelled from the start (at least 1 for
+        ints), clamped to the parameter's valid range.
+        """
+        d = self.defs[param]
+        direction = 1 if accepted > start else -1
+        if any((t - accepted) * direction > 0 for t in tried):
+            return None
+        step = abs(accepted - start) / 3
+        if d["type"] == "int":
+            step = max(1, round(step))
+        nxt = accepted + direction * step
+        nxt = min(d["max"], max(d["min"], nxt))
+        nxt = int(nxt) if d["type"] == "int" else round(float(nxt), 10)
+        return None if nxt == accepted or nxt in tried else nxt
+
     def better(self, cand, best):
         if cand["failed"] or cand["mean_gap"] is None:
             return False, "failed rounds"
@@ -369,12 +392,16 @@ class Tuner:
                 continue
             self.state["step"] = {"index": idx, "param": param, "of": len(plan), "values": values}
             start_value = self.state["best"]["options"].get(param, self.defs[param]["default"])
-            for v in values:
+            numeric = self.defs[param]["type"] in ("int", "float")
+            queue = [typed(self.defs, param, v) if numeric else v for v in values]
+            tried = set()
+            while queue:
+                v = queue.pop(0)
                 if self.stop:
                     break
-                v = typed(self.defs, param, v) if self.defs[param]["type"] in ("int", "float") else v
-                if v == start_value:
+                if v == start_value or v in tried:
                     continue
+                tried.add(v)
                 opts = dict(self.state["best"]["options"])
                 opts[param] = v
                 label = f"tune-{idx:02d}-{param}={v}"
@@ -394,6 +421,11 @@ class Tuner:
                     self.event("accept", param=param, value=v, mean_gap=cand["mean_gap"])
                     self.journal(f"Accepted {param}={v}: {why} (mean rank {cand['mean_rank']:.1f}, "
                                  f"wins {cand['wins']}/{len(self.rounds)}).")
+                    # Edge extension: if this value is the furthest tried in its
+                    # direction, keep stepping that way until a step stops helping.
+                    nxt = self.extend(param, start_value, v, tried) if numeric else None
+                    if nxt is not None:
+                        queue = [nxt]
                 self.save()
             if not self.stop:
                 self.state["completed_params"].append(param)
