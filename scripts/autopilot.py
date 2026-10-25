@@ -53,6 +53,11 @@ LADDERS = {
     "pair_hmm_gap_continuation_penalty": [5, 10, 15, 25],
     "min_dangling_branch_length": [2, 4, 6, 8],
     "active_probability_threshold": [0.001, 0.002, 0.005, 0.01, 0.02],
+    # Indel-assembly settings, added after the first full-system check showed
+    # ~90% of the lost points are indels (1 bp: 0.057, 8+ bp: 0.044 of score).
+    "recover_all_dangling_branches": [False, True],
+    "max_num_haplotypes_in_population": [32, 64, 128, 256],
+    "max_alternate_alleles": [2, 3, 6, 10],
 }
 
 # Screening runs on a SLICE_MB slice of each screening round (GATK time scales
