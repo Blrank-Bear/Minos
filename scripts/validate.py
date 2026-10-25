@@ -71,9 +71,10 @@ def main():
 
     class Runner:  # minimal stand-in so tune.Tuner.run_round / cached can be reused
         stop = False
-        rounds = rounds
+        rounds = None
     runner = Runner()
     runner.args = args
+    runner.rounds = rounds
     run_round = tune.Tuner.run_round.__get__(runner)
     cached = tune.Tuner.cached.__get__(runner)
 
