@@ -91,7 +91,8 @@ class Autopilot:
         if args.reset:  # choose a new start point among --start; keep iteration count and history
             prev = {"iteration": prev.get("iteration", 0), "history": prev.get("history", [])}
         self.state = {"status": "starting", "pid": os.getpid(), "started": tune.now(), "iteration": prev.get("iteration", 0),
-                      "best": prev.get("best"), "history": prev.get("history", []), "phase": None, "batch": []}
+                      "best": prev.get("best"), "history": prev.get("history", []), "phase": None, "batch": [],
+                      "mode": args.mode}
         self.save()
 
     def save(self):
@@ -300,13 +301,28 @@ class Autopilot:
             # make sure the best has scores on the screen slices for paired deltas
             self.evaluate([(best["label"], best["options"])], SCREEN_ROUNDS + self.dev, "scoring best")
             self.state["best"]["scores"] = self.summary(best["hash"], SCREEN_ROUNDS + self.dev)["scores"]
-            # ONE change per candidate: each parameter one step up/down its value ladder.
             cands = []
-            for param, new in self.single_changes(best["options"]):
-                opts = {**best["options"], param: new}
-                cands.append((f"ap-{it:03d}-{param}={new}", opts, param, best["options"].get(param), new))
+            if self.args.mode == "global":
+                # Exploration: whole configs drawn at random from every ladder, to
+                # find a different basin than the one single steps are stuck in.
+                seen = {best["hash"]}
+                while len(cands) < self.args.batch:
+                    opts = dict(best["options"])
+                    for p, ladder in LADDERS.items():
+                        v = self.rng.choice(ladder)
+                        opts[p] = tune.typed(self.defs, p, v) if self.defs[p]["type"] in ("int", "float") else v
+                    h = tune.opts_hash(opts)
+                    if h not in seen:
+                        seen.add(h)
+                        n = sum(1 for k in opts if opts[k] != best["options"].get(k))
+                        cands.append((f"ap-{it:03d}-global-{len(cands):02d}", opts, "(global)", None, f"{n} changes"))
+            else:
+                # ONE change per candidate: each parameter one step up/down its value ladder.
+                for param, new in self.single_changes(best["options"]):
+                    opts = {**best["options"], param: new}
+                    cands.append((f"ap-{it:03d}-{param}={new}", opts, param, best["options"].get(param), new))
             screened = self.evaluate([(l, o) for l, o, *_ in cands], SCREEN_ROUNDS,
-                                     f"iteration {it}: screening {len(cands)} single changes")
+                                     f"iteration {it}: screening {len(cands)} {'global samples' if self.args.mode == 'global' else 'single changes'}")
             if self.stop:
                 break
             base = self.state["best"]["scores"]
@@ -324,6 +340,11 @@ class Autopilot:
             hist = {"iteration": it, "ts": tune.now(), "screened": len(cands),
                     "best_delta": ranked[0][0] if ranked else None, "confirmed": [c[1] for c in top]}
             self.state["history"].append(hist)
+            if not top and self.args.mode == "global":
+                self.event("iteration", iteration=it, result="no global sample beat the best on the slices")
+                self.log("iteration", iteration=it, result="global: no sample beat the best", best=best["label"])
+                self.save()
+                continue
             if not top:
                 step = self.state.get("step", 1)
                 self.event("iteration", iteration=it, result=f"no single change helped at step {step}")
@@ -383,6 +404,8 @@ def main():
     ap.add_argument("--batch", type=int, default=18)
     ap.add_argument("--mutate", type=float, default=0.25)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--mode", choices=["single", "global"], default="single",
+                    help="single = one change per candidate; global = whole random configs (exploration)")
     ap.add_argument("--reset", action="store_true",
                     help="forget the saved best and pick the best of --start on the dev rounds")
     ap.add_argument("--stop-when-converged", action="store_true",

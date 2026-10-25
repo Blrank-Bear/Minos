@@ -571,6 +571,7 @@ function autopilotCard(a) {
   return `<div class="card" style="margin-bottom:16px;border-color:color-mix(in srgb,var(--accent) 45%,var(--border))">
     <div class="card-head"><h2>🤖 Autopilot · continuous improvement</h2>
       <div class="row">${live ? `<span class="dot-live"></span>` : ""}${status(live ? "warning" : a.status === "dead" ? "critical" : "", a.status)}
+        <span class="chip">${a.mode === "global" ? "🌍 global exploration" : "🎯 one change per test"}</span>
         <span class="muted">iteration ${a.iteration ?? 0}${a.heartbeat ? ` · ♥ ${ago(a.heartbeat)}` : ""}</span>
         ${live ? `<button class="danger" id="ap-stop">⏹ Stop</button>` : `<button class="primary" id="ap-start">▶️ Start</button>`}</div></div>
     <div class="grid g4">

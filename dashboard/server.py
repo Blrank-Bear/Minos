@@ -571,6 +571,10 @@ def autopilot_start(body):
         cmd += ["--start", *[str(Path(s)) for s in body["start"]]]
     if body.get("reset"):
         cmd.append("--reset")
+    if body.get("mode") in ("single", "global"):
+        cmd += ["--mode", body["mode"]]
+    if body.get("batch"):
+        cmd += ["--batch", str(int(body["batch"]))]
     TUNE.mkdir(parents=True, exist_ok=True)
     log = (TUNE / "autopilot.log").open("a")
     proc = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
