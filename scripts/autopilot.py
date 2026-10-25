@@ -358,6 +358,10 @@ class Autopilot:
                 if expected is not None:
                     ranked.append((expected, label, opts, param, old, new))
             ranked.sort(key=lambda x: -x[0])
+            # Skip candidates that already failed 8-round confirmation against this
+            # best; otherwise the same cached winners are re-confirmed forever.
+            rejected = set(self.state.setdefault("rejected", {}).get(best["hash"], []))
+            ranked = [c for c in ranked if tune.opts_hash(c[2]) not in rejected]
             top = [c for c in ranked[:CONFIRM_TOP] if c[0] > 0]
             hist = {"iteration": it, "ts": tune.now(), "screened": len(cands),
                     "best_delta": ranked[0][0] if ranked else None, "confirmed": [c[1] for c in top]}
@@ -417,6 +421,7 @@ class Autopilot:
                 self.state["step"] = 1
                 self.full_check(f"after iteration {it}")
             else:
+                self.state["rejected"].setdefault(best["hash"], []).extend(tune.opts_hash(c[2]) for c in top)
                 self.event("iteration", iteration=it, result=f"confirmed best {w['mean_gap']} not better than {best['mean_gap']}")
                 self.log("iteration", iteration=it, result="screen winners did not hold on 8 rounds", best=best["label"])
             self.save()
