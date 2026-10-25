@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minos Miner Console</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <svg class="helix" viewBox="0 0 120 600" preserveAspectRatio="none">
+      <defs>
+        <pattern id="hx" width="120" height="120" patternUnits="userSpaceOnUse">
+          <path d="M10 0 C 110 30, 110 90, 10 120" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M110 0 C 10 30, 10 90, 110 120" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M28 15 H92 M20 35 H100 M20 85 H100 M28 105 H92" stroke="currentColor" stroke-width="1.5"/>
+        </pattern>
+      </defs>
+      <rect width="120" height="600" fill="url(#hx)"/>
+    </svg>
+    <div class="grid-dots"></div>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="#/overview">
+      <span class="brand-mark">🧬</span>
+      <span class="brand-text"><strong>Minos</strong> Miner Console <span class="muted">· SN107</span></span>
+    </a>
+    <div class="top-actions">
+      <span id="live-pill" class="pill">⏳ loading…</span>
+      <button class="icon-btn" id="refresh-btn" title="Refresh all data">🔄</button>
+      <button class="icon-btn" id="theme-btn" title="Toggle theme">🌓</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidenav" id="nav">
+      <a href="#/overview" data-tab="overview"><span>🏠</span>Overview</a>
+      <a href="#/live" data-tab="live"><span>📡</span>Live round</a>
+      <a href="#/rounds" data-tab="rounds"><span>🧬</span>Rounds</a>
+      <a href="#/replays" data-tab="replays"><span>🏁</span>Replays</a>
+      <a href="#/configs" data-tab="configs"><span>⚙️</span>Configs</a>
+      <a href="#/jobs" data-tab="jobs"><span>🧪</span>Jobs <b id="jobs-badge" class="badge" hidden></b></a>
+      <a href="#/logs" data-tab="logs"><span>📜</span>Logs</a>
+      <a href="#/system" data-tab="system"><span>🖥️</span>System</a>
+    </nav>
+    <main id="view" class="view" tabindex="-1"></main>
+  </div>
+
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-scrim" data-close></div>
+    <aside class="drawer-panel" role="dialog" aria-modal="true">
+      <button class="icon-btn drawer-close" data-close title="Close">✕</button>
+      <div id="drawer-body"></div>
+    </aside>
+  </div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="tooltip" class="tooltip" hidden></div>
+
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

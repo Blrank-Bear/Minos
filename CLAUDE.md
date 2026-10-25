@@ -14,6 +14,12 @@
   `meta.json` per round (exact region + finalized leaderboard) comes from `scripts/fetch_round_meta.py`,
   which uses the public Minos MCP server via `scripts/minos_mcp.py`.
 
+- `configs/` – our variant-caller configs (`<name>.conf`); `stock-gatk.conf` is the upstream baseline.
+  Deploying one copies it to `minos_subnet/configs/<tool>.conf` (backup in `state/config_backups/`).
+- `data/replays/results.jsonl` – one record per replay (score, v2 breakdown, runtime, projected rank), appended by `scripts/score_round.py`.
+- `dashboard/` – local web console (`server.py` = stdlib JSON API + job queue; `static/` = UI). Jobs persist in `data/jobs/`,
+  journal notes in `data/journal.jsonl`. Start with `bash scripts/dashboard.sh` in WSL, open http://localhost:8787.
+
 ## Running things
 Windows host; tools run in WSL. From Git Bash use `MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash <script>`;
 put multi-step shell work in a script file rather than inline `wsl ... -c "..."` (quoting breaks).
