@@ -491,7 +491,8 @@ async function tune(view) {
     <div class="view-head"><div><h1>🎛️ Tuning — one change at a time</h1>
       <p>Each step changes a single parameter, replays it on ${st.dev_rounds?.length ?? 8} past rounds exactly as validators score, and keeps it only if the mean gap to each round's #1 improves.</p></div>
       <div class="row">${tuneStatus(st.status)}${st.heartbeat ? `<span class="muted">♥ ${ago(st.heartbeat)}</span>` : ""}
-        ${active ? `<button class="danger" id="tn-stop">⏹ Stop</button>` : `<button class="primary" id="tn-start">▶️ ${best ? "Resume" : "Start"} tuning</button>`}</div></div>
+        ${active ? `<button class="danger" id="tn-stop">⏹ Stop</button>` : `<button class="primary" id="tn-start">▶️ ${best ? "Resume" : "Start"} tuning</button>${best ? `<button id="tn-pass">🔁 New pass from best</button>` : ""}`}
+        ${st.pass ? `<span class="chip">pass ${st.pass}</span>` : ""}</div></div>
     ${st.error ? `<div class="callout warn" style="margin-bottom:16px">💥 ${esc(st.error)}</div>` : ""}
     <div class="grid g4">
       <div class="card tile"><span class="emoji">🧭</span><span class="label">Step</span>
@@ -540,6 +541,8 @@ async function tune(view) {
     </div>`;
   const s = $("#tn-start"), p = $("#tn-stop");
   if (s) s.onclick = async () => { try { await api("tune/start", { method: "POST", body: { resume: true } }); toast("🎛️ Tuner starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
+  const np = $("#tn-pass");
+  if (np) np.onclick = async () => { try { await api("tune/start", { method: "POST", body: { resume: true, new_pass: true } }); toast("🔁 New tuning pass starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
   if (p) p.onclick = async () => { if (!confirm("Stop the tuner after the replays in flight?")) return; await api("tune/stop", { method: "POST" }); toast("⏹ Stopping after current replays…"); };
   tuneChart($("#tn-chart"), T);
 }

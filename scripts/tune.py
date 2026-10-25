@@ -172,6 +172,16 @@ class Tuner:
             "completed_params": prev.get("completed_params", []) if args.resume else [],
             "runs": 0,
         }
+        if args.new_pass and self.state["best"]:
+            # Another pass from the current best: re-screen (interactions have
+            # changed) and re-run the descent, keeping best and history.
+            self.state["pass"] = prev.get("pass", 1) + 1
+            self.state["completed_params"] = []
+            prev.pop("screen", None)
+        else:
+            self.state["pass"] = prev.get("pass", 1) if args.resume else 1
+        if args.resume and not args.new_pass and prev.get("screen"):
+            self.state["screen"] = prev["screen"]
         self.save()
 
     # ---------- persistence ----------
@@ -464,6 +474,8 @@ def main():
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--memory-gb", type=int, default=6)
     ap.add_argument("--resume", action="store_true", help="continue from data/tune/state.json")
+    ap.add_argument("--new-pass", action="store_true",
+                    help="with --resume: re-screen from the current best and run a fresh descent")
     ap.add_argument("--deploy", action="store_true",
                     help="copy every new best into minos_subnet/configs/gatk.conf (the live miner config)")
     args = ap.parse_args()

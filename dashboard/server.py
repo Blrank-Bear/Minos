@@ -545,6 +545,8 @@ def tune_start(body):
     cmd = [str(PY), "scripts/tune.py", "--workers", str(int(body.get("workers", 6))), "--deploy"]
     if body.get("resume", True) and state.get("best"):
         cmd.append("--resume")
+        if body.get("new_pass"):
+            cmd.append("--new-pass")
     TUNE.mkdir(parents=True, exist_ok=True)
     log = (TUNE / "tuner.log").open("a")
     proc = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
