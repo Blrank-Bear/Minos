@@ -24,6 +24,7 @@ import os
 import random
 import signal
 import subprocess
+import time
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -258,8 +259,18 @@ class Autopilot:
                f"max calling {summ['max_calling_seconds']:.0f} s, {len(self.dev)} dev rounds.\n"
                f"Changes vs previous best: {changes or 'n/a'}\nDeployed as the live miner config.\n\n"
                "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
-        subprocess.run(["git", "add", str(tune.BEST_OUT)], cwd=tune.ROOT)
-        subprocess.run(["git", "commit", "-q", "-m", msg], cwd=tune.ROOT)
+        # The dashboard polls git, so .git/index.lock can be briefly taken: retry.
+        for attempt in range(10):
+            add = subprocess.run(["git", "add", str(tune.BEST_OUT)], cwd=tune.ROOT, capture_output=True, text=True)
+            com = subprocess.run(["git", "commit", "-q", "-m", msg], cwd=tune.ROOT, capture_output=True, text=True)
+            if add.returncode == 0 and com.returncode == 0:
+                self.event("commit", label=label)
+                break
+            if "nothing to commit" in (com.stdout + com.stderr):
+                break
+            time.sleep(3)
+        else:
+            self.event("commit_failed", label=label, error=(com.stderr or add.stderr)[-300:])
         self.state["prev_best_opts"] = dict(opts)
         self.save()
 
