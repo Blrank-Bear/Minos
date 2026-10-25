@@ -463,7 +463,13 @@ function workBanner() {
   const pctDone = cur.rounds_total ? Math.round(100 * cur.rounds_done / cur.rounds_total) : 0;
   return `<div class="card" style="margin-bottom:16px;border-color:color-mix(in srgb,var(--accent) 40%,var(--border))">
     <div class="row"><span class="dot-live"></span><b>🛠️ Work in progress</b><span class="spacer"></span><a href="#/tune">open Tuning →</a></div>
-    ${active ? `<div class="row" style="margin-top:8px"><span>🎛️ Step ${step.index ?? "–"}/${step.of ?? "–"} · <code>${esc(cur.param || step.param || "baseline")}</code>${cur.param ? ` ${esc(fmtVal(cur.from))} → <b>${esc(fmtVal(cur.value))}</b>` : ""}</span>
+    ${active && st.phase === "screen" ? (() => {
+      const cs = st.screen?.candidates || [], fin = cs.filter(c => c.done === c.total).length;
+      const top = cs.filter(c => c.delta != null).sort((a, b) => b.delta - a.delta)[0];
+      return `<div class="row" style="margin-top:8px"><span>🔎 Screening single changes · ${fin}/${cs.length} done${top ? ` · leading: <code>${esc(top.param)}</code>=${esc(fmtVal(top.value))} (${sgn(top.delta)})` : ""}</span>
+        <span class="spacer"></span><span class="muted">best gap ${sgn(st.best?.mean_gap)}</span></div>
+        <div class="progress" style="margin-top:8px"><i style="width:${cs.length ? Math.round(100 * fin / cs.length) : 0}%"></i></div>`;
+    })() : active ? `<div class="row" style="margin-top:8px"><span>🎛️ Step ${step.index ?? "–"}/${step.of ?? "–"} · <code>${esc(cur.param || step.param || "baseline")}</code>${cur.param ? ` ${esc(fmtVal(cur.from))} → <b>${esc(fmtVal(cur.value))}</b>` : ""}</span>
       <span class="spacer"></span><span class="muted">${cur.rounds_done ?? 0}/${cur.rounds_total ?? "?"} rounds · best gap ${sgn(st.best?.mean_gap)}</span></div>
       <div class="progress" style="margin-top:8px"><i style="width:${pctDone}%"></i></div>` : ""}
     ${jobsActive.map(j => `<div class="row" style="margin-top:8px">${jobEmoji(j.kind)} ${esc(jobTitle(j))}<span class="spacer"></span><span class="muted">${esc(j.summary || "")}</span></div>`).join("")}
@@ -492,8 +498,8 @@ async function tune(view) {
         <span class="value num">${step.index ?? "—"}<span class="muted" style="font-size:16px"> / ${step.of ?? (plan.length || "—")}</span></span>
         <span class="sub"><code>${esc(step.param || "—")}</code></span></div>
       <div class="card tile"><span class="emoji">🧪</span><span class="label">Testing now</span>
-        <span class="value" style="font-size:18px">${cur?.param ? `${esc(fmtVal(cur.from))} → ${esc(fmtVal(cur.value))}` : active ? "baseline" : "—"}</span>
-        <span class="sub">${cur ? `${cur.rounds_done ?? 0}/${cur.rounds_total ?? "?"} rounds replayed` : "idle"}</span>
+        <span class="value" style="font-size:18px">${cur?.param ? `${esc(fmtVal(cur.from))} → ${esc(fmtVal(cur.value))}` : st.phase === "screen" && active ? "🔎 screening" : active ? "baseline" : "—"}</span>
+        <span class="sub">${cur ? `${cur.rounds_done ?? 0}/${cur.rounds_total ?? "?"} rounds replayed` : st.phase === "screen" && active ? `${st.screen?.candidates?.filter(c => c.done === c.total).length ?? 0}/${st.screen?.candidates?.length ?? 0} single changes screened` : "idle"}</span>
         ${cur ? `<div class="progress" style="margin-top:6px"><i style="width:${cur.rounds_total ? Math.round(100 * cur.rounds_done / cur.rounds_total) : 0}%"></i></div>` : ""}</div>
       <div class="card tile"><span class="emoji">🥇</span><span class="label">Best so far</span>
         <span class="value num">${sgn(best?.mean_gap)}</span>
@@ -511,6 +517,7 @@ async function tune(view) {
           return `<div class="row"><span>${icon}</span><code style="flex:1">${i + 1}. ${esc(p)}</code>${accepted ? `<span class="chip">→ ${esc(fmtVal(accepted.value))}</span>` : ""}</div>`;
         }).join("") || empty("🗺️", "Plan appears when the tuner starts.")}</div></div>
     </div>
+    ${screenCard(st)}
     ${cur ? `<div class="card" style="margin-top:16px"><div class="card-head"><h2>🔬 Current candidate · live per round</h2><code class="muted">${esc(cur.label || "")}</code></div>
       <div class="table-wrap"><table><thead><tr><th>Round</th><th class="num">Score</th><th class="num">Gap to #1</th><th class="num">Rank</th><th class="num">Calling</th><th></th></tr></thead><tbody>
       ${(st.dev_rounds || []).map(rd => { const r = cur.per_round?.[rd]; return `<tr><td>${esc(roundLabel(rd))}</td>
@@ -534,6 +541,24 @@ async function tune(view) {
   if (s) s.onclick = async () => { try { await api("tune/start", { method: "POST", body: { resume: true } }); toast("🎛️ Tuner starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
   if (p) p.onclick = async () => { if (!confirm("Stop the tuner after the replays in flight?")) return; await api("tune/stop", { method: "POST" }); toast("⏹ Stopping after current replays…"); };
   tuneChart($("#tn-chart"), T);
+}
+function screenCard(st) {
+  const sc = st.screen;
+  if (!sc) return "";
+  const cands = sc.candidates || [];
+  const finished = cands.filter(c => c.done === c.total).length;
+  const rows = cands.slice().sort((a, b) => (b.delta ?? -9) - (a.delta ?? -9));
+  const maxAbs = Math.max(0.001, ...cands.map(c => Math.abs(c.delta || 0)));
+  const bar = d => d == null ? "" : `<span style="display:inline-block;height:8px;border-radius:4px;vertical-align:middle;margin-left:8px;width:${Math.round(60 * Math.abs(d) / maxAbs)}px;background:${d >= 0 ? "var(--good)" : "var(--critical)"}"></span>`;
+  return `<div class="card" style="margin-top:16px"><div class="card-head"><h2>🔎 Phase 1 · screening single changes</h2>
+      <span class="muted">${finished}/${cands.length} candidates · ${sc.rounds?.length} rounds each · paired Δ score vs current best${sc.status === "done" ? " · ✅ done" : ""}</span></div>
+    <div class="progress" style="margin-bottom:12px"><i style="width:${cands.length ? Math.round(100 * finished / cands.length) : 0}%"></i></div>
+    ${sc.plan ? `<div class="callout" style="margin-bottom:12px">🗺️ Descent order from screening: ${sc.plan.map(([p, v]) => `<code>${esc(p)}</code> (${v.map(fmtVal).join(", ")})`).join(" → ") || "no single change helped"}</div>` : ""}
+    <div class="table-wrap" style="max-height:420px;overflow:auto"><table><thead><tr><th>Change</th><th class="num">Δ score</th><th class="num">Rounds</th><th class="num">Max calling</th></tr></thead><tbody>
+    ${rows.map(c => `<tr><td><code>${esc(c.param)}</code> = <b>${esc(fmtVal(c.value))}</b></td>
+      <td class="num">${c.delta == null ? "<span class='muted'>⏳</span>" : sgn(c.delta)}${bar(c.delta)}</td>
+      <td class="num">${c.done}/${c.total}</td><td class="num">${runtimeCell(c.max_calling_seconds)}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
 }
 function tuneChart(box, T) {
   const ev = (T.events || []).slice().reverse().filter(e => e.kind === "baseline" || e.kind === "candidate");
@@ -564,7 +589,10 @@ function activityFeed(T) {
     const text = e.kind === "candidate" ? `${e.accepted ? "✅" : "❌"} ${e.param} = ${fmtVal(e.value)} · gap ${sgn(e.mean_gap)}`
       : e.kind === "accept" ? `🏆 new best: ${e.param} = ${fmtVal(e.value)}`
       : e.kind === "baseline" ? `📏 baseline scored · gap ${sgn(e.mean_gap)}`
-      : e.kind === "start" ? `🚀 tuner started (${e.workers} workers)` : `🔔 ${e.kind}`;
+      : e.kind === "start" ? `🚀 tuner started (${e.workers} workers)`
+      : e.kind === "screen_start" ? `🔎 screening ${e.candidates} single changes (${e.runs} replays)`
+      : e.kind === "screen_done" ? `🗺️ screening done · ${(e.plan || []).length} helpful parameters`
+      : `🔔 ${e.kind}`;
     items.push({ ts: e.ts, text });
   }
   for (const j of (S.logs?.journal || []).slice(0, 15)) items.push({ ts: j.ts, text: `📓 ${j.text}` });

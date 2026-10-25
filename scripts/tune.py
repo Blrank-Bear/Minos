@@ -78,6 +78,38 @@ PLANS = {
     ],
 }
 
+# Screening: every single change, wide ranges, on three short rounds (one per
+# main chromosome). Scored as the paired mean score difference vs the base
+# config on the same rounds, so round difficulty cancels out.
+SCREEN_ROUNDS = ["20261024T154600Z", "20261024T105800Z", "20261024T121000Z"]  # chr12 6.0, chr13 6.4, chr11 7.8 Mb
+SCREEN = [
+    ("standard_min_confidence_threshold_for_calling", [50.0, 80.0, 100.0, 150.0]),
+    ("min_mapping_quality_score", [30, 40, 50, 60]),
+    ("min_base_quality_score", [15, 20, 25]),
+    ("base_quality_score_threshold", [10, 25]),
+    ("pcr_indel_model", ["NONE", "AGGRESSIVE", "HOSTILE"]),
+    ("heterozygosity", [0.0001, 0.0005, 0.003]),
+    ("indel_heterozygosity", [0.00001, 0.00005, 0.0005]),
+    ("phred_scaled_global_read_mismapping_rate", [20, 30, 60]),
+    ("contamination_fraction_to_filter", [0.02, 0.05, 0.1, 0.2]),
+    ("max_reads_per_alignment_start", [0, 10, 25]),
+    ("dont_use_soft_clipped_bases", [True]),
+    ("active_probability_threshold", [0.0005, 0.005, 0.02]),
+    ("min_pruning", [1, 3, 5]),
+    ("pruning_lod_threshold", [1.0, 4.0]),
+    ("adaptive_pruning_initial_error_rate", [0.0001, 0.01]),
+    ("pair_hmm_gap_continuation_penalty", [5, 15, 25]),
+    ("max_alternate_alleles", [2, 10]),
+    ("min_dangling_branch_length", [2, 8]),
+    ("recover_all_dangling_branches", [True]),
+    ("max_num_haplotypes_in_population", [32, 256]),
+    ("min_assembly_region_size", [25, 100]),
+    ("max_assembly_region_size", [200, 500]),
+    ("assembly_region_padding", [50, 200]),
+]
+SCREEN_MIN_DELTA = 0.0002   # paired score gain (0-1 scale) for a value to enter the descent plan
+SCREEN_KEEP_VALUES = 2      # best values per parameter carried into the descent
+
 MAX_CALLING_SECONDS = 600   # headroom under the validators' 900 s at 2 threads
 MIN_IMPROVEMENT = 1e-5      # mean-gap units; ties keep the current config
 
@@ -158,7 +190,8 @@ class Tuner:
             fh.write(json.dumps({"ts": now(), "tag": tag, "text": text}) + "\n")
 
     # ---------- evaluation ----------
-    def cached(self, chash):
+    def cached(self, chash, rounds=None):
+        rounds = set(rounds or self.rounds)
         out = {}
         if RESULTS.exists():
             for line in RESULTS.read_text().splitlines():
@@ -166,9 +199,87 @@ class Tuner:
                     r = json.loads(line)
                 except ValueError:
                     continue
-                if r.get("config_hash") == chash and r.get("round") in self.rounds and r.get("ok"):
+                if r.get("config_hash") == chash and r.get("round") in rounds and r.get("ok"):
                     out[r["round"]] = r
         return out
+
+    # ---------- phase 1: screening ----------
+    def screen(self):
+        """Each single change vs the base on SCREEN_ROUNDS, all runs in one pool."""
+        base_opts = dict(self.state["best"]["options"])
+        rounds = self.args.screen_rounds
+        configs = [{"param": None, "value": None, "opts": base_opts, "label": "screen-base"}]
+        for param, values in SCREEN:
+            for v in values:
+                v = typed(self.defs, param, v) if self.defs[param]["type"] in ("int", "float") else v
+                if v == base_opts.get(param, self.defs[param]["default"]):
+                    continue
+                configs.append({"param": param, "value": v, "opts": {**base_opts, param: v},
+                                "label": f"screen-{param}={v}"})
+        for c in configs:
+            c["hash"] = opts_hash(c["opts"])
+            c["conf"] = CANDIDATES / f"{c['hash']}.conf"
+            write_conf(c["conf"], c["opts"], f"screen candidate {c['label']} ({c['hash']})")
+        sc = self.state.setdefault("screen", {})
+        sc.update(status="running", rounds=rounds, base_hash=configs[0]["hash"], started=sc.get("started") or now(),
+                  candidates=[{"param": c["param"], "value": c["value"], "hash": c["hash"], "label": c["label"],
+                               "done": 0, "total": len(rounds), "delta": None, "per_round": {}} for c in configs[1:]])
+        self.state["phase"] = "screen"
+        self.state["current"] = None
+        self.state["step"] = {"index": 0, "param": "(screening)", "of": len(configs) - 1}
+
+        def refresh():
+            base = self.cached(configs[0]["hash"], rounds)
+            sc["base_done"] = len(base)
+            for c, entry in zip(configs[1:], sc["candidates"]):
+                have = self.cached(c["hash"], rounds)
+                entry["done"] = len(have)
+                entry["per_round"] = {r: {"score": v["score"], "calling_seconds": v.get("calling_seconds")}
+                                      for r, v in have.items()}
+                diffs = [have[r]["score"] - base[r]["score"] for r in have if r in base]
+                entry["delta"] = sum(diffs) / len(diffs) if diffs else None
+                entry["max_calling_seconds"] = max((v.get("calling_seconds") or 0 for v in have.values()), default=None)
+            self.state["step"]["index"] = sum(1 for e in sc["candidates"] if e["done"] == e["total"])
+            self.save()
+
+        tasks = []
+        for c in configs:
+            have = self.cached(c["hash"], rounds)
+            tasks += [(c, r) for r in rounds if r not in have]
+        refresh()
+        self.event("screen_start", candidates=len(configs) - 1, runs=len(tasks), rounds=rounds)
+        with ThreadPoolExecutor(self.args.workers) as ex:
+            futs = [ex.submit(self.run_round, c["conf"], c["label"], r) for c, r in tasks]
+            for f in as_completed(futs):
+                f.result()
+                self.state["runs"] += 1
+                refresh()
+                if self.stop:
+                    for g in futs:
+                        g.cancel()
+        refresh()
+        if self.stop:
+            return None
+        # Descent plan: parameters ordered by their best screened gain; per
+        # parameter the best few positive values, fastest-enough ones only.
+        by_param = {}
+        for e in sc["candidates"]:
+            if e["delta"] is None or e["delta"] < SCREEN_MIN_DELTA:
+                continue
+            if (e.get("max_calling_seconds") or 0) > MAX_CALLING_SECONDS:
+                continue
+            by_param.setdefault(e["param"], []).append(e)
+        plan = sorted(((p, sorted(es, key=lambda e: -e["delta"])[:SCREEN_KEEP_VALUES]) for p, es in by_param.items()),
+                      key=lambda pe: -pe[1][0]["delta"])
+        sc["plan"] = [[p, [e["value"] for e in es]] for p, es in plan]
+        sc["status"] = "done"
+        sc["finished"] = now()
+        self.save()
+        top = ", ".join(f"{p}={es[0]['value']} ({es[0]['delta']:+.4f})" for p, es in plan[:6])
+        self.event("screen_done", plan=sc["plan"])
+        self.journal(f"Screening done ({len(configs) - 1} single changes x {len(rounds)} rounds). "
+                     f"{len(plan)} parameters improved the score; strongest: {top or 'none'}.")
+        return sc["plan"]
 
     def run_round(self, conf: Path, label: str, rd: str):
         cmd = [str(PY), "scripts/score_round.py", str(ROUNDS / rd), "--config", str(conf), "--tool", "gatk",
@@ -228,18 +339,28 @@ class Tuner:
 
     # ---------- main loop ----------
     def run(self):
-        plan = PLANS[self.args.plan]
         self.state["status"] = "running"
-        self.state["plan_params"] = [p for p, _ in plan]
         self.event("start", plan=self.args.plan, rounds=self.rounds, workers=self.args.workers)
 
         if not self.state["best"]:
-            self.state["step"] = {"index": 0, "param": "(baseline)", "of": len(plan)}
+            self.state["step"] = {"index": 0, "param": "(baseline)", "of": 0}
             self.state["current"] = {"param": None, "value": None}
             base = self.evaluate(dict(self.state["base"]["options"]), "tune-base")
             self.state["best"] = {**base, "options": dict(self.state["base"]["options"]), "since": now()}
             self.event("baseline", **base)
             self.save()
+
+        if self.args.plan == "screen":
+            sc = self.state.get("screen") or {}
+            plan = sc.get("plan") if sc.get("status") == "done" else self.screen()
+            if plan is None:  # stopped mid-screen
+                self.state["status"] = "stopped"
+                self.save()
+                return
+        else:
+            plan = PLANS[self.args.plan]
+        self.state["phase"] = "descent"
+        self.state["plan_params"] = [p for p, _ in plan]
 
         for idx, (param, values) in enumerate(plan, 1):
             if self.stop:
@@ -291,8 +412,10 @@ class Tuner:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default=str(ROOT / "configs" / "stock-gatk.conf"))
-    ap.add_argument("--plan", default="default", choices=sorted(PLANS))
+    ap.add_argument("--plan", default="screen", choices=sorted(PLANS) + ["screen"],
+                    help="'screen' = screen every single change first, then descend in order of gain")
     ap.add_argument("--rounds", nargs="+", default=DEV_ROUNDS)
+    ap.add_argument("--screen-rounds", nargs="+", default=SCREEN_ROUNDS)
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--memory-gb", type=int, default=6)
