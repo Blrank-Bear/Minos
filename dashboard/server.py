@@ -39,6 +39,10 @@ ROUNDS = DATA / "rounds"
 RESULTS = DATA / "replays" / "results.jsonl"
 JOBS_DIR = DATA / "jobs"
 JOURNAL = DATA / "journal.jsonl"
+TUNE = DATA / "tune"
+TUNE_STATE = TUNE / "state.json"
+TUNE_EVENTS = TUNE / "events.jsonl"
+TUNED_CONF = ROOT / "configs" / "gatk-tuned.conf"
 CONFIGS = ROOT / "configs"
 STATE = ROOT / "state"
 PY = ROOT / ".venv" / "bin" / "python"
@@ -486,6 +490,73 @@ def logs_data():
     }
 
 
+def pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, TypeError, ValueError):
+        return False
+    try:  # a finished child we never reaped still answers kill(0): check for zombie
+        return Path(f"/proc/{int(pid)}/stat").read_text().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
+def deliverable(path: Path, label: str):
+    rel = str(path.relative_to(ROOT))
+    if not path.exists():
+        return {"name": label, "path": rel, "exists": False, "status": "not created yet"}
+    last = run(["git", "log", "-1", "--pretty=format:%h%x1f%aI%x1f%s", "--", rel]).split("\x1f")
+    dirty = bool(run(["git", "status", "--short", "--", rel]).strip())
+    return {
+        "name": label, "path": rel, "exists": True,
+        "modified": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds"),
+        "committed": last[0] or None, "commit_date": last[1] if len(last) > 1 else None,
+        "commit_subject": last[2] if len(last) > 2 else None,
+        "uncommitted": dirty, "status": "uncommitted changes" if dirty else ("committed" if last[0] else "untracked"),
+    }
+
+
+def tune_data():
+    state = read_json(TUNE_STATE, {}) or {}
+    alive = pid_alive(state.get("pid")) if state else False
+    if state.get("status") in ("running", "starting", "stopping") and not alive:
+        state["status"] = "dead"  # process gone without writing a final status
+    events = read_jsonl(TUNE_EVENTS)[-300:]
+    return {
+        "state": state, "alive": alive, "events": list(reversed(events)),
+        "deliverables": [
+            deliverable(TUNED_CONF, "Tuned GATK config"),
+            deliverable(ROOT / "scripts" / "tune.py", "Tuner"),
+            deliverable(ROOT / "dashboard" / "static" / "app.js", "Dashboard UI"),
+            deliverable(ROOT / "scripts" / "score_round.py", "Replay scorer"),
+        ],
+        "live_config": parse_conf((REPO / "configs" / "gatk.conf").read_text()) if (REPO / "configs" / "gatk.conf").exists() else {},
+    }
+
+
+def tune_start(body):
+    state = read_json(TUNE_STATE, {}) or {}
+    if state and pid_alive(state.get("pid")) and state.get("status") in ("running", "starting", "stopping"):
+        return {"error": "tuner already running"}, 409
+    cmd = [str(PY), "scripts/tune.py", "--workers", str(int(body.get("workers", 5)))]
+    if body.get("resume", True) and state.get("best"):
+        cmd.append("--resume")
+    TUNE.mkdir(parents=True, exist_ok=True)
+    log = (TUNE / "tuner.log").open("a")
+    proc = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    threading.Thread(target=proc.wait, daemon=True).start()  # reap it when it exits
+    return {"started": " ".join(cmd[1:])}, 200
+
+
+def tune_stop():
+    state = read_json(TUNE_STATE, {}) or {}
+    pid = state.get("pid")
+    if not pid_alive(pid):
+        return {"error": "tuner not running"}, 409
+    os.kill(int(pid), signal.SIGTERM)  # tuner finishes the round batch in flight, then stops
+    return {"stopping": pid}, 200
+
+
 def env_settings():
     env = {}
     p = REPO / ".env"
@@ -591,6 +662,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(logs_data())
             if parts == ["system"]:
                 return self._json(system_data())
+            if parts == ["tune"]:
+                return self._json(tune_data())
             return self._json({"error": "not found"}, 404)
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
@@ -658,6 +731,12 @@ class Handler(SimpleHTTPRequestHandler):
                 with JOURNAL.open("a") as fh:
                     fh.write(json.dumps(entry) + "\n")
                 return self._json(entry)
+            if parts == ["tune", "start"]:
+                out, code = tune_start(body)
+                return self._json(out, code)
+            if parts == ["tune", "stop"]:
+                out, code = tune_stop()
+                return self._json(out, code)
             if parts == ["refresh"]:
                 CACHE._data.clear()
                 return self._json({"ok": True})

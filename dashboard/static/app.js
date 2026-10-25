@@ -1,7 +1,7 @@
 /* Minos Miner Console — single-page app over the dashboard/server.py JSON API. */
 "use strict";
 
-const S = { live: null, rounds: null, replays: null, configs: null, jobs: null, logs: null, system: null, params: {} };
+const S = { live: null, rounds: null, replays: null, configs: null, jobs: null, logs: null, system: null, tune: null, params: {} };
 const UI = {
   tab: "overview",
   roundsFilter: { chrom: "", status: "finalized", q: "" },
@@ -53,7 +53,7 @@ const empty = (emoji, text, extra = "") => `<div class="empty"><span class="big"
 
 async function load(key, force = false) {
   if (S[key] && !force) return S[key];
-  const path = { live: "live", rounds: "rounds", replays: "replays", configs: "configs", jobs: "jobs", logs: "logs", system: "system" }[key];
+  const path = { live: "live", rounds: "rounds", replays: "replays", configs: "configs", jobs: "jobs", logs: "logs", system: "system", tune: "tune" }[key];
   try { S[key] = await api(path); } catch (e) { S[key] = { error: e.message }; }
   return S[key];
 }
@@ -119,7 +119,7 @@ function openDrawer(html) {
 function closeDrawer() { $("#drawer").hidden = true; }
 
 /* ---------------- router ---------------- */
-const VIEWS = { overview, live, rounds, replays, configs, jobs, logs, system };
+const VIEWS = { overview, live, rounds, replays, tune, configs, jobs, logs, system };
 function route() {
   const tab = (location.hash.replace(/^#\//, "") || "overview").split("/")[0];
   UI.tab = VIEWS[tab] ? tab : "overview";
@@ -139,8 +139,8 @@ async function render() {
 
 /* ================= OVERVIEW ================= */
 async function overview(view) {
-  view.innerHTML = `<div class="skeleton"></div>`;
-  await Promise.all(["live", "rounds", "replays", "system", "jobs", "logs"].map(k => load(k)));
+  if (!S.rounds) view.innerHTML = `<div class="skeleton"></div>`;
+  await Promise.all(["live", "rounds", "replays", "system", "jobs", "logs", "tune"].map(k => load(k)));
   const cur = S.live?.current || {};
   const lastFinal = finalizedRounds()[0];
   const best = bestSummary();
@@ -149,6 +149,7 @@ async function overview(view) {
   view.innerHTML = `
     <div class="view-head"><div><h1>👋 Mining overview</h1><p>Live round, our best config against the field, and what's left before going live.</p></div>
       <div class="row"><button id="ov-fetch">📥 Fetch new rounds</button><button class="primary" onclick="location.hash='#/jobs'">🏁 Run a replay</button></div></div>
+    <div id="ov-work">${workBanner()}</div>
     <div class="grid g4">
       <div class="card tile"><span class="emoji">📡</span><span class="label">Current round</span>
         <span class="value">${esc(cur.chromosome || "—")}</span>
@@ -439,6 +440,138 @@ function exportCsv() {
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
   a.download = "minos-replays.csv";
   a.click();
+}
+
+/* ================= TUNING (live work status) ================= */
+const TUNE_STATUS = {
+  running: ["warning", "🔄 tuning in progress"], starting: ["warning", "🚀 starting"], stopping: ["serious", "⏸️ stopping"],
+  finished: ["good", "✅ finished"], stopped: ["", "⏹️ stopped"], error: ["critical", "💥 error"], dead: ["critical", "💀 process gone"],
+};
+const tuneStatus = st => { const [k, l] = TUNE_STATUS[st] || ["", st || "not started"]; return status(k, l); };
+const roundLabel = dir => { const r = (S.rounds?.rounds || []).find(x => x.dir === dir); return r ? `${r.chromosome} · ${short(r.round_id)}` : dir; };
+function fmtVal(v) { return typeof v === "number" ? (Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(1) : String(+v.toFixed(6))) : String(v); }
+
+function workBanner() {
+  const T = S.tune || {}, st = T.state || {};
+  const active = ["running", "starting", "stopping"].includes(st.status) && T.alive;
+  const jobsActive = (S.jobs?.jobs || []).filter(j => j.status === "running");
+  if (!active && !jobsActive.length) {
+    if (!st.status) return "";
+    return `<div class="card callout" style="margin-bottom:16px">🎛️ Tuner ${tuneStatus(st.status)} · best dev gap ${sgn(st.best?.mean_gap)} · avg rank ${st.best?.mean_rank?.toFixed(1) ?? "—"} · <a href="#/tune">details →</a></div>`;
+  }
+  const cur = st.current || {}, step = st.step || {};
+  const pctDone = cur.rounds_total ? Math.round(100 * cur.rounds_done / cur.rounds_total) : 0;
+  return `<div class="card" style="margin-bottom:16px;border-color:color-mix(in srgb,var(--accent) 40%,var(--border))">
+    <div class="row"><span class="dot-live"></span><b>🛠️ Work in progress</b><span class="spacer"></span><a href="#/tune">open Tuning →</a></div>
+    ${active ? `<div class="row" style="margin-top:8px"><span>🎛️ Step ${step.index ?? "–"}/${step.of ?? "–"} · <code>${esc(cur.param || step.param || "baseline")}</code>${cur.param ? ` ${esc(fmtVal(cur.from))} → <b>${esc(fmtVal(cur.value))}</b>` : ""}</span>
+      <span class="spacer"></span><span class="muted">${cur.rounds_done ?? 0}/${cur.rounds_total ?? "?"} rounds · best gap ${sgn(st.best?.mean_gap)}</span></div>
+      <div class="progress" style="margin-top:8px"><i style="width:${pctDone}%"></i></div>` : ""}
+    ${jobsActive.map(j => `<div class="row" style="margin-top:8px">${jobEmoji(j.kind)} ${esc(jobTitle(j))}<span class="spacer"></span><span class="muted">${esc(j.summary || "")}</span></div>`).join("")}
+  </div>`;
+}
+
+async function tune(view) {
+  if (!S.tune) view.innerHTML = `<div class="skeleton"></div>`;
+  await Promise.all([load("tune", true), load("rounds")]);
+  const T = S.tune || {}, st = T.state || {};
+  const best = st.best;
+  const hist = st.history || [];
+  const cur = st.current, step = st.step || {};
+  const active = ["running", "starting", "stopping"].includes(st.status) && T.alive;
+  const baseline = (T.events || []).find(e => e.kind === "baseline");
+  const plan = st.plan_params || [];
+  const done = new Set(st.completed_params || []);
+  view.innerHTML = `
+    <div class="view-head"><div><h1>🎛️ Tuning — one change at a time</h1>
+      <p>Each step changes a single parameter, replays it on ${st.dev_rounds?.length ?? 8} past rounds exactly as validators score, and keeps it only if the mean gap to each round's #1 improves.</p></div>
+      <div class="row">${tuneStatus(st.status)}${st.heartbeat ? `<span class="muted">♥ ${ago(st.heartbeat)}</span>` : ""}
+        ${active ? `<button class="danger" id="tn-stop">⏹ Stop</button>` : `<button class="primary" id="tn-start">▶️ ${best ? "Resume" : "Start"} tuning</button>`}</div></div>
+    ${st.error ? `<div class="callout warn" style="margin-bottom:16px">💥 ${esc(st.error)}</div>` : ""}
+    <div class="grid g4">
+      <div class="card tile"><span class="emoji">🧭</span><span class="label">Step</span>
+        <span class="value num">${step.index ?? "—"}<span class="muted" style="font-size:16px"> / ${step.of ?? (plan.length || "—")}</span></span>
+        <span class="sub"><code>${esc(step.param || "—")}</code></span></div>
+      <div class="card tile"><span class="emoji">🧪</span><span class="label">Testing now</span>
+        <span class="value" style="font-size:18px">${cur?.param ? `${esc(fmtVal(cur.from))} → ${esc(fmtVal(cur.value))}` : active ? "baseline" : "—"}</span>
+        <span class="sub">${cur ? `${cur.rounds_done ?? 0}/${cur.rounds_total ?? "?"} rounds replayed` : "idle"}</span>
+        ${cur ? `<div class="progress" style="margin-top:6px"><i style="width:${cur.rounds_total ? Math.round(100 * cur.rounds_done / cur.rounds_total) : 0}%"></i></div>` : ""}</div>
+      <div class="card tile"><span class="emoji">🥇</span><span class="label">Best so far</span>
+        <span class="value num">${sgn(best?.mean_gap)}</span>
+        <span class="sub">avg rank ${best?.mean_rank?.toFixed(1) ?? "—"} · ${best?.wins ?? 0} wins · ${best?.top5 ?? 0} top-5</span></div>
+      <div class="card tile"><span class="emoji">📈</span><span class="label">Gain vs stock</span>
+        <span class="value num">${best && baseline ? sgn(best.mean_gap - baseline.mean_gap) : "—"}</span>
+        <span class="sub">${hist.filter(h => h.accepted).length} accepted · ${hist.length} tried · ${st.runs ?? 0} replays</span></div>
+    </div>
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card span2"><div class="card-head"><h2>📈 Progress</h2><span class="muted">mean gap to #1 per candidate · higher is better · 0 = tie with winner</span></div><div id="tn-chart"></div></div>
+      <div class="card"><div class="card-head"><h2>🗺️ Plan</h2><span class="muted">${done.size}/${plan.length} params done</span></div>
+        <div class="stack" style="gap:6px;max-height:320px;overflow:auto">${plan.map((p, i) => {
+          const accepted = hist.filter(h => h.param === p && h.accepted).pop();
+          const icon = done.has(p) ? (accepted ? "✅" : "➖") : step.param === p ? "🔄" : "⏳";
+          return `<div class="row"><span>${icon}</span><code style="flex:1">${i + 1}. ${esc(p)}</code>${accepted ? `<span class="chip">→ ${esc(fmtVal(accepted.value))}</span>` : ""}</div>`;
+        }).join("") || empty("🗺️", "Plan appears when the tuner starts.")}</div></div>
+    </div>
+    ${cur ? `<div class="card" style="margin-top:16px"><div class="card-head"><h2>🔬 Current candidate · live per round</h2><code class="muted">${esc(cur.label || "")}</code></div>
+      <div class="table-wrap"><table><thead><tr><th>Round</th><th class="num">Score</th><th class="num">Gap to #1</th><th class="num">Rank</th><th class="num">Calling</th><th></th></tr></thead><tbody>
+      ${(st.dev_rounds || []).map(rd => { const r = cur.per_round?.[rd]; return `<tr><td>${esc(roundLabel(rd))}</td>
+        <td class="num">${r?.score != null ? f4(r.score) : r?.failed ? status("critical", "failed") : "<span class='muted'>⏳ running…</span>"}</td>
+        <td class="num">${sgn(r?.gap)}</td><td class="num">${r?.rank ? `${rankEmoji(r.rank)} ${r.rank}` : "—"}</td>
+        <td class="num">${runtimeCell(r?.calling_seconds)}</td><td>${r?.cached ? "<span class='muted'>cached</span>" : ""}</td></tr>`; }).join("")}
+      </tbody></table></div></div>` : ""}
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-head"><h2>🧾 Step history</h2><span class="muted">newest first</span></div>
+        ${hist.length ? `<div class="table-wrap"><table><thead><tr><th></th><th>Change</th><th class="num">Mean gap</th><th class="num">Rank</th><th class="num">🥇</th><th class="num">Max calling</th></tr></thead><tbody>
+        ${hist.slice().reverse().map(h => `<tr title="${esc(h.reason)}"><td>${h.accepted ? "✅" : "❌"}</td><td><code>${esc(h.param)}</code><br><span class="muted">${esc(fmtVal(h.from))} → <b>${esc(fmtVal(h.value))}</b> · ${esc(h.reason)}</span></td>
+          <td class="num">${sgn(h.mean_gap)}</td><td class="num">${h.mean_rank?.toFixed(1) ?? "—"}</td><td class="num">${h.wins ?? 0}</td><td class="num">${runtimeCell(h.max_calling_seconds)}</td></tr>`).join("")}
+        </tbody></table></div>` : empty("🧾", "No candidates evaluated yet.")}</div>
+      <div class="stack">
+        <div class="card"><div class="card-head"><h2>🧬 Best config vs stock</h2><a href="#/configs">open in editor →</a></div>${configDiff(st)}</div>
+        <div class="card"><div class="card-head"><h2>📦 Deliverables</h2></div>${deliverables(T)}</div>
+        <div class="card"><div class="card-head"><h2>📡 Live activity</h2></div>${activityFeed(T)}</div>
+      </div>
+    </div>`;
+  const s = $("#tn-start"), p = $("#tn-stop");
+  if (s) s.onclick = async () => { try { await api("tune/start", { method: "POST", body: { resume: true } }); toast("🎛️ Tuner starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
+  if (p) p.onclick = async () => { if (!confirm("Stop the tuner after the replays in flight?")) return; await api("tune/stop", { method: "POST" }); toast("⏹ Stopping after current replays…"); };
+  tuneChart($("#tn-chart"), T);
+}
+function tuneChart(box, T) {
+  const ev = (T.events || []).slice().reverse().filter(e => e.kind === "baseline" || e.kind === "candidate");
+  if (!ev.length) { box.innerHTML = empty("📈", "Progress appears after the baseline is scored."); return; }
+  let bestSoFar = null;
+  const bestLine = ev.map(e => { if (e.kind === "baseline" || e.accepted) bestSoFar = e.mean_gap; return bestSoFar; });
+  Charts.line(box, {
+    series: [{ name: "candidate", color: C.s1, values: ev.map(e => e.mean_gap ?? null) },
+             { name: "best so far", color: C.s2, values: bestLine }],
+    labels: ev.map((e, i) => e.kind === "baseline" ? "stock" : `#${i}`), fmt: v => v.toFixed(4), height: 260,
+    tipTitle: i => ev[i].kind === "baseline" ? "stock baseline" : `${ev[i].param} = ${fmtVal(ev[i].value)} ${ev[i].accepted ? "✅ accepted" : "❌ rejected"}`,
+  });
+}
+function configDiff(st) {
+  const b = st.base?.options || {}, t = st.best?.options || {};
+  const keys = Object.keys(t).filter(k => t[k] !== b[k]);
+  if (!keys.length) return empty("🟰", "No changes from stock yet.");
+  return `<div class="table-wrap"><table><thead><tr><th>Parameter</th><th class="num">Stock</th><th class="num">Tuned</th></tr></thead><tbody>
+    ${keys.map(k => `<tr><td><code>${esc(k)}</code></td><td class="num muted">${esc(fmtVal(b[k]))}</td><td class="num"><b>${esc(fmtVal(t[k]))}</b></td></tr>`).join("")}</tbody></table></div>`;
+}
+function deliverables(T) {
+  return `<ul class="checklist">${(T.deliverables || []).map(d => `<li><span class="ico">${!d.exists ? "⏳" : d.uncommitted ? "✳️" : d.committed ? "✅" : "🆕"}</span>
+    <div><b>${esc(d.name)}</b> <code class="muted">${esc(d.path)}</code><small>${d.exists ? `${esc(d.status)} · updated ${ago(d.modified)}${d.committed ? ` · last commit ${esc(d.committed)} “${esc(d.commit_subject)}”` : ""}` : "not created yet"}</small></div></li>`).join("")}</ul>`;
+}
+function activityFeed(T) {
+  const items = [];
+  for (const e of (T.events || []).slice(0, 40)) {
+    const text = e.kind === "candidate" ? `${e.accepted ? "✅" : "❌"} ${e.param} = ${fmtVal(e.value)} · gap ${sgn(e.mean_gap)}`
+      : e.kind === "accept" ? `🏆 new best: ${e.param} = ${fmtVal(e.value)}`
+      : e.kind === "baseline" ? `📏 baseline scored · gap ${sgn(e.mean_gap)}`
+      : e.kind === "start" ? `🚀 tuner started (${e.workers} workers)` : `🔔 ${e.kind}`;
+    items.push({ ts: e.ts, text });
+  }
+  for (const j of (S.logs?.journal || []).slice(0, 15)) items.push({ ts: j.ts, text: `📓 ${j.text}` });
+  for (const c of (S.logs?.project || []).slice(0, 10)) items.push({ ts: c.date, text: `🛠️ commit ${c.short}: ${c.subject}` });
+  items.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  if (!items.length) return empty("📡", "Nothing yet.");
+  return `<div class="stack" style="gap:6px;max-height:360px;overflow:auto">${items.slice(0, 40).map(i => `<div class="row" style="align-items:flex-start"><span class="muted" style="min-width:64px">${ago(i.ts)}</span><span style="flex:1">${esc(i.text)}</span></div>`).join("")}</div>`;
 }
 
 /* ================= CONFIGS ================= */
@@ -738,6 +871,14 @@ async function pollJobs() {
   }
   if (UI.tab === "jobs") refreshLog();
 }
+async function pollTune() {
+  await Promise.all([load("tune", true), load("logs", true)]);
+  const st = S.tune?.state || {};
+  const live = ["running", "starting", "stopping"].includes(st.status) && S.tune?.alive;
+  $("#tune-badge").hidden = !live;
+  if (UI.tab === "tune") render();
+  else if (UI.tab === "overview" && $("#ov-work")) $("#ov-work").innerHTML = workBanner();
+}
 async function pollLive() {
   await load("live", true);
   updatePill();
@@ -762,3 +903,5 @@ pollLive();
 setInterval(tickCountdowns, 1000);
 setInterval(pollLive, 30000);
 setInterval(pollJobs, 4000);
+pollTune();
+setInterval(pollTune, 5000);

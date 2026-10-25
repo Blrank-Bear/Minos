@@ -93,6 +93,8 @@ def main() -> int:
     ap.add_argument("--tool", default="gatk", choices=["gatk", "deepvariant", "bcftools"])
     ap.add_argument("--config", type=Path, default=None, help="default: minos_subnet/configs/<tool>.conf")
     ap.add_argument("--threads", type=int, default=2)
+    ap.add_argument("--memory-gb", type=int, default=None,
+                    help="cap the caller container's RAM (default: host RAM - 1 GB); set when running several at once")
     ap.add_argument("--scoring-version", default="v2", choices=["v1", "v2"])
     ap.add_argument("--region", default=None, help="override the inferred region")
     ap.add_argument("--label", default=None, help="config name in results (default: config file stem)")
@@ -130,6 +132,10 @@ def main() -> int:
     MINER_CONFIG["num_threads"] = args.threads
     tool_config = m._load_config_for_scoring(config_path, args.tool)
     options = tool_config.get(f"{args.tool}_options", {})
+    if args.memory_gb:
+        # Infra setting read by the template, outside <tool>_options, so it is
+        # not part of the submitted config or its hash.
+        tool_config["memory_gb"] = args.memory_gb
 
     # Observe the run without changing it: wrap the template call (runtime,
     # variant count) and the v2 scorer (its inputs, for the breakdown).
