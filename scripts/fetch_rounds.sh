@@ -3,12 +3,13 @@
 #
 # Usage: bash scripts/fetch_rounds.sh [round_id...]
 #   No args: every round the current /verification/task-window lists as drawn.
-# Files land in minos_subnet/datasets/rounds/<YYYYMMDDTHHMMSSZ>/, with
-# round.json holding the verification record. Downloads are hash-checked.
+# Files land in data/rounds/<YYYYMMDDTHHMMSSZ>/, with round.json holding the
+# verification record. Downloads are hash-checked. Kept outside minos_subnet/
+# so the upstream clone stays clean (its auto-updater skips a dirty tree).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="$ROOT/minos_subnet/datasets/rounds"
+OUT="$ROOT/data/rounds"
 API="https://api.theminos.ai"
 PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY=python3

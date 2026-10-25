@@ -183,3 +183,4 @@ cython_debug/
 minos_subnet/
 state/
 .tmp/
+data/

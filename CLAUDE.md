@@ -10,6 +10,7 @@
 - `scripts/` – our tooling (setup, round fetching, offline scoring). Run inside WSL (Ubuntu) from the project root.
 - `.venv/` – Python env (bittensor 10.3.1) used by the scripts.
 - `state/` – miner ledgers and scoring-version state (paths set in `minos_subnet/.env`).
+- `data/rounds/` – revealed past rounds (BAM, truth, mutations) for offline tuning; fetched by `scripts/fetch_rounds.sh`.
 
 ## Running things
 Windows host; tools run in WSL. From Git Bash use `MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash <script>`;

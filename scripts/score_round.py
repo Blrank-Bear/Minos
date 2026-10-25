@@ -9,7 +9,7 @@ with what the stock --score path lacks for tuning:
   * the thread count is set explicitly, to mimic a small validator (2-8).
 
 Usage (inside WSL, from the project root):
-  .venv/bin/python scripts/score_round.py minos_subnet/datasets/rounds/<dir> \
+  .venv/bin/python scripts/score_round.py data/rounds/<dir> \
       [--config minos_subnet/configs/gatk.conf] [--tool gatk] [--threads 2]
 """
 import argparse
