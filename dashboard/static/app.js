@@ -453,6 +453,14 @@ function fmtVal(v) { return typeof v === "number" ? (Math.abs(v) < 0.01 && v !==
 
 function workBanner() {
   const T = S.tune || {}, st = T.state || {};
+  const ap = T.autopilot || {};
+  if (["running", "starting", "stopping"].includes(ap.status) && ap.alive) {
+    const batch = ap.batch || [], fin = batch.filter(x => x.done === x.total).length;
+    return `<div class="card" style="margin-bottom:16px;border-color:color-mix(in srgb,var(--accent) 40%,var(--border))">
+      <div class="row"><span class="dot-live"></span><b>🤖 Autopilot running</b> · iteration ${ap.iteration ?? 0} · ${esc(ap.phase || "")}
+        <span class="spacer"></span><span class="muted">best ${esc(ap.best?.label || "—")} · dev gap ${sgn(ap.best?.mean_gap)}</span><a href="#/tune">details →</a></div>
+      <div class="progress" style="margin-top:8px"><i style="width:${batch.length ? Math.round(100 * fin / batch.length) : 0}%"></i></div></div>`;
+  }
   const active = ["running", "starting", "stopping"].includes(st.status) && T.alive;
   const jobsActive = (S.jobs?.jobs || []).filter(j => j.status === "running");
   if (!active && !jobsActive.length) {
@@ -494,6 +502,7 @@ async function tune(view) {
         ${active ? `<button class="danger" id="tn-stop">⏹ Stop</button>` : `<button class="primary" id="tn-start">▶️ ${best ? "Resume" : "Start"} tuning</button>${best ? `<button id="tn-pass">🔁 New pass from best</button>` : ""}`}
         ${st.pass ? `<span class="chip">pass ${st.pass}</span>` : ""}</div></div>
     ${st.error ? `<div class="callout warn" style="margin-bottom:16px">💥 ${esc(st.error)}</div>` : ""}
+    ${autopilotCard(T.autopilot)}
     <div class="grid g4">
       <div class="card tile"><span class="emoji">🧭</span><span class="label">Step</span>
         <span class="value num">${step.index ?? "—"}<span class="muted" style="font-size:16px"> / ${step.of ?? (plan.length || "—")}</span></span>
@@ -541,10 +550,43 @@ async function tune(view) {
     </div>`;
   const s = $("#tn-start"), p = $("#tn-stop");
   if (s) s.onclick = async () => { try { await api("tune/start", { method: "POST", body: { resume: true } }); toast("🎛️ Tuner starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
+  const as = $("#ap-start"), ast = $("#ap-stop");
+  if (as) as.onclick = async () => { try { await api("autopilot/start", { method: "POST", body: {} }); toast("🤖 Autopilot starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
+  if (ast) ast.onclick = async () => { if (!confirm("Stop the autopilot after the replays in flight?")) return; await api("autopilot/stop", { method: "POST" }); toast("⏹ Autopilot stopping…"); };
   const np = $("#tn-pass");
   if (np) np.onclick = async () => { try { await api("tune/start", { method: "POST", body: { resume: true, new_pass: true } }); toast("🔁 New tuning pass starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
   if (p) p.onclick = async () => { if (!confirm("Stop the tuner after the replays in flight?")) return; await api("tune/stop", { method: "POST" }); toast("⏹ Stopping after current replays…"); };
   tuneChart($("#tn-chart"), T);
+}
+function autopilotCard(a) {
+  if (!a || !a.status) {
+    return `<div class="card" style="margin-bottom:16px"><div class="row"><b>🤖 Autopilot</b><span class="muted">not started</span><span class="spacer"></span>
+      <button class="primary" id="ap-start">▶️ Start autopilot</button></div></div>`;
+  }
+  const live = ["running", "starting", "stopping"].includes(a.status) && a.alive;
+  const b = a.best || {};
+  const batch = a.batch || [];
+  const done = batch.filter(x => x.done === x.total).length;
+  const hist = (a.history || []).slice().reverse();
+  return `<div class="card" style="margin-bottom:16px;border-color:color-mix(in srgb,var(--accent) 45%,var(--border))">
+    <div class="card-head"><h2>🤖 Autopilot · continuous improvement</h2>
+      <div class="row">${live ? `<span class="dot-live"></span>` : ""}${status(live ? "warning" : a.status === "dead" ? "critical" : "", a.status)}
+        <span class="muted">iteration ${a.iteration ?? 0}${a.heartbeat ? ` · ♥ ${ago(a.heartbeat)}` : ""}</span>
+        ${live ? `<button class="danger" id="ap-stop">⏹ Stop</button>` : `<button class="primary" id="ap-start">▶️ Start</button>`}</div></div>
+    <div class="grid g4">
+      <div class="tile"><span class="label">Best config</span><span class="value" style="font-size:18px">${esc(b.label || "—")}</span><span class="sub">since ${ago(b.since)}</span></div>
+      <div class="tile"><span class="label">Dev gap to #1</span><span class="value num">${sgn(b.mean_gap)}</span><span class="sub">avg rank ${b.mean_rank ? b.mean_rank.toFixed(1) : "—"} · ${b.wins ?? 0} wins</span></div>
+      <div class="tile"><span class="label">Now</span><span class="value" style="font-size:15px">${esc(a.phase || "—")}</span><span class="sub">${done}/${batch.length} candidates complete</span>
+        <div class="progress" style="margin-top:6px"><i style="width:${batch.length ? Math.round(100 * done / batch.length) : 0}%"></i></div></div>
+      <div class="tile"><span class="label">Accepted</span><span class="value num">${(a.history || []).filter(h => h.accepted).length}</span><span class="sub">of ${(a.history || []).length} iterations</span></div>
+    </div>
+    ${batch.length ? `<div class="table-wrap" style="margin-top:12px;max-height:300px;overflow:auto"><table><thead><tr><th>Candidate</th><th class="num">Rounds</th><th class="num">Δ vs best</th><th class="num">Gap to #1</th><th>Changes</th></tr></thead><tbody>
+      ${batch.slice().sort((x, y) => (y.delta ?? -9) - (x.delta ?? -9)).map(x => `<tr><td><code>${esc(x.label)}</code></td><td class="num">${x.done}/${x.total}</td>
+        <td class="num">${x.delta == null ? "⏳" : sgn(x.delta)}</td><td class="num">${sgn(x.mean_gap)}</td>
+        <td class="muted" style="font-size:12px">${esc(Object.entries(x.changes || {}).map(([k, v]) => `${k}=${fmtVal(v)}`).join(", ") || "—")}</td></tr>`).join("")}
+    </tbody></table></div>` : ""}
+    ${hist.length ? `<div class="muted" style="margin-top:10px;font-size:12.5px">${hist.slice(0, 6).map(h => `#${h.iteration}: ${h.accepted ? "✅ accepted " + esc(h.winner) + " " + sgn(h.winner_gap) : h.confirmed?.length ? "❌ confirmed " + h.confirmed.length + ", none better" : "➖ no positive mutation"}`).join(" · ")}</div>` : ""}
+  </div>`;
 }
 function validationCard(v) {
   if (!v || !v.configs) return "";
@@ -920,7 +962,9 @@ async function pollJobs() {
 async function pollTune() {
   await Promise.all([load("tune", true), load("logs", true)]);
   const st = S.tune?.state || {};
-  const live = ["running", "starting", "stopping"].includes(st.status) && S.tune?.alive;
+  const apa = S.tune?.autopilot || {};
+  const live = (["running", "starting", "stopping"].includes(st.status) && S.tune?.alive)
+    || (["running", "starting", "stopping"].includes(apa.status) && apa.alive);
   $("#tune-badge").hidden = !live;
   if (UI.tab === "tune") render();
   else if (UI.tab === "overview" && $("#ov-work")) $("#ov-work").innerHTML = workBanner();

@@ -523,11 +523,16 @@ def tune_data():
     if state.get("status") in ("running", "starting", "stopping") and not alive:
         state["status"] = "dead"  # process gone without writing a final status
     events = read_jsonl(TUNE_EVENTS)[-300:]
+    autopilot = read_json(TUNE / "autopilot.json", {}) or {}
+    autopilot["alive"] = pid_alive(autopilot.get("pid")) if autopilot else False
+    if autopilot.get("status") in ("running", "starting", "stopping") and not autopilot["alive"]:
+        autopilot["status"] = "dead"
     validation = read_json(TUNE / "validation.json", {}) or {}
     if validation.get("status") == "running" and not pid_alive(validation.get("pid")):
         validation["status"] = "dead"
     return {
         "state": state, "alive": alive, "events": list(reversed(events)), "validation": validation,
+        "autopilot": autopilot,
         "deliverables": [
             deliverable(TUNED_CONF, "Tuned GATK config"),
             deliverable(ROOT / "scripts" / "tune.py", "Tuner"),
@@ -552,6 +557,28 @@ def tune_start(body):
     proc = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     threading.Thread(target=proc.wait, daemon=True).start()  # reap it when it exits
     return {"started": " ".join(cmd[1:])}, 200
+
+
+def autopilot_start(body):
+    ap = read_json(TUNE / "autopilot.json", {}) or {}
+    if ap and pid_alive(ap.get("pid")) and ap.get("status") in ("running", "starting", "stopping"):
+        return {"error": "autopilot already running"}, 409
+    cmd = [str(PY), "scripts/autopilot.py", "--workers", str(int(body.get("workers", 9)))]
+    if body.get("start"):
+        cmd += ["--start", *[str(Path(s)) for s in body["start"]]]
+    TUNE.mkdir(parents=True, exist_ok=True)
+    log = (TUNE / "autopilot.log").open("a")
+    proc = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    threading.Thread(target=proc.wait, daemon=True).start()
+    return {"started": " ".join(cmd[1:])}, 200
+
+
+def autopilot_stop():
+    ap = read_json(TUNE / "autopilot.json", {}) or {}
+    if not pid_alive(ap.get("pid")):
+        return {"error": "autopilot not running"}, 409
+    os.kill(int(ap["pid"]), signal.SIGTERM)
+    return {"stopping": ap["pid"]}, 200
 
 
 def tune_stop():
@@ -739,6 +766,12 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(entry)
             if parts == ["tune", "start"]:
                 out, code = tune_start(body)
+                return self._json(out, code)
+            if parts == ["autopilot", "start"]:
+                out, code = autopilot_start(body)
+                return self._json(out, code)
+            if parts == ["autopilot", "stop"]:
+                out, code = autopilot_stop()
                 return self._json(out, code)
             if parts == ["tune", "stop"]:
                 out, code = tune_stop()

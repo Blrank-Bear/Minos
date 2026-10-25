@@ -52,6 +52,8 @@ def main():
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--base", default=str(ROOT / "configs" / "stock-gatk.conf"))
+    ap.add_argument("--mutate", type=float, default=1.0,
+                    help="probability each parameter is re-drawn; <1 searches around --base")
     args = ap.parse_args()
     sys.argv = sys.argv[:1]
     os.chdir(ROOT)
@@ -62,8 +64,10 @@ def main():
     jobs = []
     for i in range(args.n):
         opts = dict(base)
-        for k, f in SPACE.items():
-            opts[k] = tune.typed(defs, k, f(rng)) if defs[k]["type"] in ("int", "float") else f(rng)
+        while opts == base:  # at least one change
+            for k, f in SPACE.items():
+                if rng.random() < args.mutate:
+                    opts[k] = tune.typed(defs, k, f(rng)) if defs[k]["type"] in ("int", "float") else f(rng)
         label = f"rs-{args.seed}-{i:03d}"
         conf = OUT / f"{label}.conf"
         tune.write_conf(conf, opts, f"random search {label}")
