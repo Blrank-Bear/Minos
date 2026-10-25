@@ -542,7 +542,7 @@ def tune_start(body):
     state = read_json(TUNE_STATE, {}) or {}
     if state and pid_alive(state.get("pid")) and state.get("status") in ("running", "starting", "stopping"):
         return {"error": "tuner already running"}, 409
-    cmd = [str(PY), "scripts/tune.py", "--workers", str(int(body.get("workers", 5)))]
+    cmd = [str(PY), "scripts/tune.py", "--workers", str(int(body.get("workers", 6))), "--deploy"]
     if body.get("resume", True) and state.get("best"):
         cmd.append("--resume")
     TUNE.mkdir(parents=True, exist_ok=True)

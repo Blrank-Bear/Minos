@@ -332,6 +332,16 @@ class Tuner:
             "mean_germline": mean([r["breakdown"].get("germline") for r in ok if r.get("breakdown", {}).get("germline") is not None]),
         }
 
+    def deploy(self):
+        """Make the best config the live miner config (what a registered miner submits)."""
+        live = REPO / "configs" / "gatk.conf"
+        backup = ROOT / "state" / "config_backups" / f"gatk-{datetime.now():%Y%m%d-%H%M%S}.conf"
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        if live.exists():
+            backup.write_bytes(live.read_bytes())
+        live.write_bytes(BEST_OUT.read_bytes())
+        self.event("deploy", file=str(live.relative_to(ROOT)), backup=str(backup.relative_to(ROOT)))
+
     def extend(self, param, start, accepted, tried):
         """Next value beyond `accepted`, moving away from `start`, or None.
 
@@ -419,6 +429,8 @@ class Tuner:
                                f"dev mean gap to #1 {cand['mean_gap']:+.5f}, mean rank {cand['mean_rank']:.1f} "
                                f"over {len(self.rounds)} rounds ({now()})")
                     self.event("accept", param=param, value=v, mean_gap=cand["mean_gap"])
+                    if self.args.deploy:
+                        self.deploy()
                     self.journal(f"Accepted {param}={v}: {why} (mean rank {cand['mean_rank']:.1f}, "
                                  f"wins {cand['wins']}/{len(self.rounds)}).")
                     # Edge extension: if this value is the furthest tried in its
@@ -452,6 +464,8 @@ def main():
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--memory-gb", type=int, default=6)
     ap.add_argument("--resume", action="store_true", help="continue from data/tune/state.json")
+    ap.add_argument("--deploy", action="store_true",
+                    help="copy every new best into minos_subnet/configs/gatk.conf (the live miner config)")
     args = ap.parse_args()
     sys.argv = sys.argv[:1]
     os.chdir(ROOT)
