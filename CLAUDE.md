@@ -11,6 +11,8 @@
 - `.venv/` – Python env (bittensor 10.3.1) used by the scripts.
 - `state/` – miner ledgers and scoring-version state (paths set in `minos_subnet/.env`).
 - `data/rounds/` – revealed past rounds (BAM, truth, mutations) for offline tuning; fetched by `scripts/fetch_rounds.sh`.
+  `meta.json` per round (exact region + finalized leaderboard) comes from `scripts/fetch_round_meta.py`,
+  which uses the public Minos MCP server via `scripts/minos_mcp.py`.
 
 ## Running things
 Windows host; tools run in WSL. From Git Bash use `MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash <script>`;
