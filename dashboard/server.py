@@ -523,8 +523,11 @@ def tune_data():
     if state.get("status") in ("running", "starting", "stopping") and not alive:
         state["status"] = "dead"  # process gone without writing a final status
     events = read_jsonl(TUNE_EVENTS)[-300:]
+    validation = read_json(TUNE / "validation.json", {}) or {}
+    if validation.get("status") == "running" and not pid_alive(validation.get("pid")):
+        validation["status"] = "dead"
     return {
-        "state": state, "alive": alive, "events": list(reversed(events)),
+        "state": state, "alive": alive, "events": list(reversed(events)), "validation": validation,
         "deliverables": [
             deliverable(TUNED_CONF, "Tuned GATK config"),
             deliverable(ROOT / "scripts" / "tune.py", "Tuner"),

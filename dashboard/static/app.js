@@ -517,6 +517,7 @@ async function tune(view) {
           return `<div class="row"><span>${icon}</span><code style="flex:1">${i + 1}. ${esc(p)}</code>${accepted ? `<span class="chip">→ ${esc(fmtVal(accepted.value))}</span>` : ""}</div>`;
         }).join("") || empty("🗺️", "Plan appears when the tuner starts.")}</div></div>
     </div>
+    ${validationCard(T.validation)}
     ${screenCard(st)}
     ${cur ? `<div class="card" style="margin-top:16px"><div class="card-head"><h2>🔬 Current candidate · live per round</h2><code class="muted">${esc(cur.label || "")}</code></div>
       <div class="table-wrap"><table><thead><tr><th>Round</th><th class="num">Score</th><th class="num">Gap to #1</th><th class="num">Rank</th><th class="num">Calling</th><th></th></tr></thead><tbody>
@@ -541,6 +542,20 @@ async function tune(view) {
   if (s) s.onclick = async () => { try { await api("tune/start", { method: "POST", body: { resume: true } }); toast("🎛️ Tuner starting…"); setTimeout(pollTune, 1500); } catch (e) { toast(`⚠️ ${esc(e.message)}`); } };
   if (p) p.onclick = async () => { if (!confirm("Stop the tuner after the replays in flight?")) return; await api("tune/stop", { method: "POST" }); toast("⏹ Stopping after current replays…"); };
   tuneChart($("#tn-chart"), T);
+}
+function validationCard(v) {
+  if (!v || !v.configs) return "";
+  const icon = { running: "🔄", finished: "✅", dead: "💀" }[v.status] || "⏸️";
+  return `<div class="card" style="margin-top:16px"><div class="card-head"><h2>🧪 Held-out validation</h2>
+      <span class="muted">${icon} ${esc(v.status)} · ${v.rounds?.length ?? 0} finalized rounds the tuner never saw${v.heartbeat ? ` · ♥ ${ago(v.heartbeat)}` : ""}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Config</th><th class="num">Rounds</th><th class="num">Mean score</th><th class="num">Mean gap</th><th class="num">Avg rank</th>
+      <th class="num">🥇 Wins</th><th class="num">Beats #1</th><th class="num">Top 5</th><th class="num">Max calling</th></tr></thead><tbody>
+    ${v.configs.map(c => `<tr><td><b>${esc(c.name)}</b> <code class="muted">${esc(c.hash)}</code>
+        ${c.done < c.total ? `<div class="progress" style="margin-top:6px;max-width:220px"><i style="width:${Math.round(100 * c.done / Math.max(1, c.total))}%"></i></div>` : ""}</td>
+      <td class="num">${c.done}/${c.total}</td><td class="num">${f4(c.mean_score)}</td><td class="num">${sgn(c.mean_gap)}</td>
+      <td class="num">${c.mean_rank ? c.mean_rank.toFixed(1) : "—"}</td><td class="num">${c.wins ?? 0}</td><td class="num">${c.beats_top1 ?? 0}</td>
+      <td class="num">${c.top5 ?? 0}</td><td class="num">${runtimeCell(c.max_calling_seconds)}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
 }
 function screenCard(st) {
   const sc = st.screen;
