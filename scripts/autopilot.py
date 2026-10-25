@@ -210,6 +210,28 @@ class Autopilot:
             out += [(param, v) for v in steps]
         return out
 
+    def solo_timing(self, label, opts):
+        """GATK calling time of opts on its slowest dev round with nothing else running."""
+        chash, conf = self.materialise(opts, label)
+        have = self.results(chash, self.dev)
+        if not have:
+            return None
+        slowest = max(have.values(), key=lambda r: r.get("calling_seconds") or 0)["round"]
+        self.state["phase"] = f"timing {label} alone on {slowest}"
+        self.save()
+        cmd = [str(tune.PY), "scripts/score_round.py", str(tune.ROUNDS / slowest), "--config", str(conf),
+               "--label", f"{label}-solo", "--threads", "2", "--memory-gb", "8", "--no-record"]
+        t = time.time()
+        out = subprocess.run(cmd, cwd=tune.ROOT, capture_output=True, text=True).stdout
+        line = next((l for l in out.splitlines() if "Variants called" in l), "")
+        try:  # "Variants called: N  (123s)"
+            secs = float(line.rsplit("(", 1)[1].rstrip("s)"))
+        except (IndexError, ValueError):
+            secs = None
+        self.log("solo_timing", label=label, round=slowest, calling_seconds=secs, wall_seconds=time.time() - t,
+                 contended_seconds=have[slowest].get("calling_seconds"))
+        return secs
+
     def breakdown(self, chash, rounds):
         """Summed per-class TP/FN/FP over full rounds (from replay records)."""
         tot = {"tp": 0, "fn": 0, "fp": 0, "class": {}}
@@ -377,8 +399,15 @@ class Autopilot:
             winner = max(top, key=lambda c: confirmed[c[1]]["mean_gap"] if confirmed[c[1]]["mean_gap"] is not None else -9)
             w = confirmed[winner[1]]
             ok = (w["done"] == len(self.dev) and w["mean_gap"] is not None
-                  and w["mean_gap"] > best["mean_gap"] + tune.MIN_IMPROVEMENT
-                  and (w["max_calling_seconds"] or 0) <= tune.MAX_CALLING_SECONDS)
+                  and w["mean_gap"] > best["mean_gap"] + tune.MIN_IMPROVEMENT)
+            if ok and (w["max_calling_seconds"] or 0) > tune.MAX_CALLING_SECONDS:
+                # Timings above come from ~10 runs sharing 12 cores (~2x slower than a
+                # validator job, which gets its own cores). Re-time the slowest round alone.
+                solo = self.solo_timing(winner[1], dict(winner[2]))
+                w["solo_calling_seconds"] = solo
+                ok = solo is not None and solo <= tune.MAX_CALLING_SECONDS
+                if not ok:
+                    self.log("iteration", iteration=it, result=f"{winner[1]} better but too slow alone ({solo}s)")
             hist.update(winner=winner[1], winner_gap=w["mean_gap"], accepted=ok)
             if ok:
                 self.accept(winner[1], dict(winner[2]), w,
