@@ -108,6 +108,8 @@ def main() -> int:
 
     rd = args.round_dir.resolve()
     config_path = str(args.config.resolve()) if args.config else None
+    if args.keep:  # resolve before chdir, or a relative path lands inside minos_subnet/
+        args.keep = args.keep.resolve()
     label = args.label or (args.config.stem if args.config else f"stock-{args.tool}")
     # The miner resolves configs/ and datasets/ relative to the repo.
     os.chdir(REPO)
