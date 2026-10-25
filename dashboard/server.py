@@ -428,6 +428,7 @@ class Jobs:
             log.write(f"\n=== [{i + 1}/{len(rounds)}] {rd} ===\n")
             rc = self._sh(job, [PY, "scripts/score_round.py", ROUNDS / rd, "--config", cfg,
                                 "--tool", p.get("tool", "gatk"), "--threads", p.get("threads", 2),
+                                "--memory-gb", p.get("memory_gb", 6),  # leave RAM for a concurrent tuner
                                 "--label", p["config"], "--job", job["id"]], log)
             ok += rc == 0
             job["progress"] = i + 1
