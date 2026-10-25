@@ -22,8 +22,10 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -172,12 +174,26 @@ def main() -> int:
 
     print(f"round={rd.name} region={region} tool={args.tool} threads={args.threads} "
           f"scoring={args.scoring_version} config={config_path or f'configs/{args.tool}.conf'}", flush=True)
+    # _run_and_score writes next to the BAM (score_run/). Give every run its own
+    # directory with hard-linked inputs so concurrent replays of one round (tuner
+    # + dashboard jobs) can't overwrite each other's VCFs.
+    work = rd / "runs" / f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    work.mkdir(parents=True)
+    for name in ("input.bam", "input.bam.bai"):
+        if (rd / name).exists():
+            try:
+                os.link(rd / name, work / name)
+            except OSError:
+                shutil.copy2(rd / name, work / name)
     t0 = time.time()
-    score = m._run_and_score(
-        tool=args.tool, tool_config=tool_config, bam_path=bam, ref_path=ref,
-        truth_path=truth, mutations_path=muts, region=region,
-        scoring_version=args.scoring_version,
-    )
+    try:
+        score = m._run_and_score(
+            tool=args.tool, tool_config=tool_config, bam_path=work / "input.bam", ref_path=ref,
+            truth_path=truth, mutations_path=muts, region=region,
+            scoring_version=args.scoring_version,
+        )
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     total = time.time() - t0
     place = placement(score, meta["leaderboard"]) if score is not None and meta.get("leaderboard") else {}
     print(f"RESULT round={rd.name} score={score} total_seconds={total:.0f}", flush=True)
