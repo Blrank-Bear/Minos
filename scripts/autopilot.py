@@ -88,6 +88,8 @@ class Autopilot:
         self.rng = random.Random(args.seed)
         self.dev = tune.DEV_ROUNDS
         prev = json.loads(STATE.read_text()) if STATE.exists() else {}
+        if args.reset:  # choose a new start point among --start; keep iteration count and history
+            prev = {"iteration": prev.get("iteration", 0), "history": prev.get("history", [])}
         self.state = {"status": "starting", "pid": os.getpid(), "started": tune.now(), "iteration": prev.get("iteration", 0),
                       "best": prev.get("best"), "history": prev.get("history", []), "phase": None, "batch": []}
         self.save()
@@ -381,6 +383,8 @@ def main():
     ap.add_argument("--batch", type=int, default=18)
     ap.add_argument("--mutate", type=float, default=0.25)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--reset", action="store_true",
+                    help="forget the saved best and pick the best of --start on the dev rounds")
     ap.add_argument("--stop-when-converged", action="store_true",
                     help="stop when no single change helps (default: keep re-checking)")
     args = ap.parse_args()

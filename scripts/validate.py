@@ -45,11 +45,15 @@ def main():
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--memory-gb", type=int, default=6)
     ap.add_argument("--include-dev", action="store_true", help="also replay the tuner's dev rounds")
+    ap.add_argument("--dev-only", action="store_true", help="replay only the tuner's 8 dev rounds")
+    ap.add_argument("--out", type=Path, default=OUT, help="progress file (default data/tune/validation.json)")
     args = ap.parse_args()
     sys.argv = sys.argv[:1]
     os.chdir(tune.ROOT)
     defs = tune.param_defs()
-    rounds = finalized_rounds(set() if args.include_dev else set(tune.DEV_ROUNDS))
+    rounds = (list(tune.DEV_ROUNDS) if args.dev_only
+              else finalized_rounds(set() if args.include_dev else set(tune.DEV_ROUNDS)))
+    out_path = args.out
 
     state = {"status": "running", "pid": os.getpid(), "started": tune.now(), "rounds": rounds, "configs": []}
     entries = []
@@ -61,9 +65,9 @@ def main():
 
     def save():
         state["heartbeat"] = tune.now()
-        tmp = OUT.with_suffix(".tmp")
+        tmp = out_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(state, indent=2))
-        os.replace(tmp, OUT)
+        os.replace(tmp, out_path)
 
     class Runner:  # minimal stand-in so tune.Tuner.run_round / cached can be reused
         stop = False

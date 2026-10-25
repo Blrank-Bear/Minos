@@ -569,6 +569,8 @@ def autopilot_start(body):
     cmd = [str(PY), "scripts/autopilot.py", "--workers", str(int(body.get("workers", 9)))]
     if body.get("start"):
         cmd += ["--start", *[str(Path(s)) for s in body["start"]]]
+    if body.get("reset"):
+        cmd.append("--reset")
     TUNE.mkdir(parents=True, exist_ok=True)
     log = (TUNE / "autopilot.log").open("a")
     proc = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
