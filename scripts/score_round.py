@@ -102,6 +102,8 @@ def main() -> int:
     ap.add_argument("--label", default=None, help="config name in results (default: config file stem)")
     ap.add_argument("--job", default=None, help="dashboard job id, recorded with the result")
     ap.add_argument("--no-record", action="store_true", help="don't append to data/replays/results.jsonl")
+    ap.add_argument("--keep", type=Path, default=None,
+                    help="copy the run's output VCFs and hap.py files into this directory for analysis")
     args = ap.parse_args()
 
     rd = args.round_dir.resolve()
@@ -193,6 +195,10 @@ def main() -> int:
             scoring_version=args.scoring_version,
         )
     finally:
+        if args.keep and (work / "score_run").exists():
+            args.keep.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(work / "score_run", args.keep, dirs_exist_ok=True)
+            print(f"KEPT {args.keep}", flush=True)
         shutil.rmtree(work, ignore_errors=True)
     total = time.time() - t0
     place = placement(score, meta["leaderboard"]) if score is not None and meta.get("leaderboard") else {}
