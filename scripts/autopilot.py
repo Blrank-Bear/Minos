@@ -36,6 +36,7 @@ import tune  # noqa: E402
 STATE = tune.TUNE / "autopilot.json"
 LOG = tune.TUNE / "autopilot_log.jsonl"   # every screen / confirm / full check, for later analysis
 CONFIRM_TOP = 3
+FOCUS_OUT = tune.ROOT / "configs" / "gatk-focus.conf"
 
 # Value ladders for one-change-at-a-time candidates (one rung up / down).
 LADDERS = {
@@ -86,7 +87,11 @@ class Autopilot:
         self.defs = tune.param_defs()
         self.stop = False
         self.rng = random.Random(args.seed)
-        self.dev = tune.DEV_ROUNDS
+        self.dev = [args.focus_round] if args.focus_round else tune.DEV_ROUNDS
+        # Focus mode: test directly on one full round (fast feedback); otherwise
+        # screen on slices and confirm on the 8 dev rounds.
+        self.focus = bool(args.focus_round)
+        self.screen = self.dev if self.focus else SCREEN_ROUNDS
         prev = json.loads(STATE.read_text()) if STATE.exists() else {}
         if args.reset:  # choose a new start point among --start; keep iteration count and history
             prev = {"iteration": prev.get("iteration", 0), "history": prev.get("history", [])}
@@ -271,22 +276,27 @@ class Autopilot:
     # ---------- main loop ----------
     def accept(self, label, opts, summ, why):
         self.state["best"] = {"label": label, "options": opts, "hash": tune.opts_hash(opts), "since": tune.now(), **summ}
-        tune.write_conf(tune.BEST_OUT, opts, f"GATK config tuned by scripts/autopilot.py ({label})\n"
-                        f"dev mean gap to #1 {summ['mean_gap']:+.5f}, mean rank {summ['mean_rank']:.1f} "
-                        f"over {len(self.dev)} rounds ({tune.now()})")
-        live = tune.REPO / "configs" / "gatk.conf"
-        live.write_bytes(tune.BEST_OUT.read_bytes())
+        out = FOCUS_OUT if self.focus else tune.BEST_OUT
+        tune.write_conf(out, opts, f"GATK config tuned by scripts/autopilot.py ({label})\n"
+                        f"{'focus round ' + self.dev[0] if self.focus else 'dev'} mean gap to #1 {summ['mean_gap']:+.5f}, "
+                        f"mean rank {summ['mean_rank']:.1f} over {len(self.dev)} rounds ({tune.now()})")
+        if not self.focus:  # focus results are verified on other rounds before going live
+            live = tune.REPO / "configs" / "gatk.conf"
+            live.write_bytes(tune.BEST_OUT.read_bytes())
         with tune.JOURNAL.open("a") as fh:
-            fh.write(json.dumps({"ts": tune.now(), "tag": "tuning", "text": f"Autopilot accepted {label}: {why}. Deployed as live config."}) + "\n")
+            fh.write(json.dumps({"ts": tune.now(), "tag": "tuning", "text": f"Autopilot accepted {label}: {why}."
+                                 + ("" if self.focus else " Deployed as live config.")}) + "\n")
         self.event("accept", label=label, mean_gap=summ["mean_gap"], mean_rank=summ["mean_rank"], why=why)
         changes = ", ".join(f"{k}={v}" for k, v in opts.items() if v != self.state.get("prev_best_opts", {}).get(k))
-        msg = (f"Autopilot: new best config ({label})\n\n{why}\nmean rank {summ['mean_rank']:.1f}, "
-               f"max calling {summ['max_calling_seconds']:.0f} s, {len(self.dev)} dev rounds.\n"
-               f"Changes vs previous best: {changes or 'n/a'}\nDeployed as the live miner config.\n\n"
+        where = ("Focus-round result: NOT deployed; verify on the other rounds first."
+                 if self.focus else "Deployed as the live miner config.")
+        msg = (f"Autopilot{' (focus)' if self.focus else ''}: new best config ({label})\n\n{why}\n"
+               f"mean rank {summ['mean_rank']:.1f}, max calling {summ['max_calling_seconds']:.0f} s, "
+               f"{len(self.dev)} round(s).\nChanges vs previous best: {changes or 'n/a'}\n{where}\n\n"
                "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
         # The dashboard polls git, so .git/index.lock can be briefly taken: retry.
         for attempt in range(10):
-            add = subprocess.run(["git", "add", str(tune.BEST_OUT)], cwd=tune.ROOT, capture_output=True, text=True)
+            add = subprocess.run(["git", "add", str(out)], cwd=tune.ROOT, capture_output=True, text=True)
             com = subprocess.run(["git", "commit", "-q", "-m", msg], cwd=tune.ROOT, capture_output=True, text=True)
             if add.returncode == 0 and com.returncode == 0:
                 self.event("commit", label=label)
@@ -321,8 +331,8 @@ class Autopilot:
             it = self.state["iteration"]
             best = self.state["best"]
             # make sure the best has scores on the screen slices for paired deltas
-            self.evaluate([(best["label"], best["options"])], SCREEN_ROUNDS + self.dev, "scoring best")
-            self.state["best"]["scores"] = self.summary(best["hash"], SCREEN_ROUNDS + self.dev)["scores"]
+            self.evaluate([(best["label"], best["options"])], self.screen + self.dev, "scoring best")
+            self.state["best"]["scores"] = self.summary(best["hash"], self.screen + self.dev)["scores"]
             cands = []
             if self.args.mode == "global":
                 # Exploration: whole configs drawn at random from every ladder, to
@@ -343,7 +353,7 @@ class Autopilot:
                 for param, new in self.single_changes(best["options"]):
                     opts = {**best["options"], param: new}
                     cands.append((f"ap-{it:03d}-{param}={new}", opts, param, best["options"].get(param), new))
-            screened = self.evaluate([(l, o) for l, o, *_ in cands], SCREEN_ROUNDS,
+            screened = self.evaluate([(l, o) for l, o, *_ in cands], self.screen,
                                      f"iteration {it}: screening {len(cands)} {'global samples' if self.args.mode == 'global' else 'single changes'}")
             if self.stop:
                 break
@@ -352,9 +362,9 @@ class Autopilot:
             for label, opts, param, old, new in cands:
                 s = screened[label]
                 diffs = [s["scores"][r] - base[r] for r in s["scores"] if r in base]
-                expected = sum(diffs) / len(diffs) if len(diffs) == len(SCREEN_ROUNDS) else None
+                expected = sum(diffs) / len(diffs) if len(diffs) == len(self.screen) else None
                 self.log("screen", iteration=it, label=label, param=param, old=old, new=new, expected_delta=expected,
-                         per_slice={r: s["scores"].get(r) for r in SCREEN_ROUNDS})
+                         per_slice={r: s["scores"].get(r) for r in self.screen})
                 if expected is not None:
                     ranked.append((expected, label, opts, param, old, new))
             ranked.sort(key=lambda x: -x[0])
@@ -366,6 +376,25 @@ class Autopilot:
             hist = {"iteration": it, "ts": tune.now(), "screened": len(cands),
                     "best_delta": ranked[0][0] if ranked else None, "confirmed": [c[1] for c in top]}
             self.state["history"].append(hist)
+            if self.focus:
+                # The candidate was scored on the full focus round itself: no
+                # separate confirmation step, accept the best improvement now.
+                win = next((c for c in ranked if c[0] > tune.MIN_IMPROVEMENT), None)
+                if win:
+                    summ = self.summary(tune.opts_hash(win[2]), self.dev)
+                    hist.update(winner=win[1], winner_gap=summ["mean_gap"], accepted=True)
+                    self.log("confirm", iteration=it, label=win[1], param=win[3], old=win[4], new=win[5],
+                             expected_delta=win[0], actual_gap_delta=win[0], mean_gap=summ["mean_gap"],
+                             mean_rank=summ["mean_rank"], max_calling_seconds=summ["max_calling_seconds"],
+                             per_round=summ["scores"], fp_delta=0, fn_delta=0, class_delta={}, matched_expectation=True)
+                    self.accept(win[1], dict(win[2]), summ,
+                                f"focus round {self.dev[0]}: one change {win[3]}: {win[4]} -> {win[5]}; "
+                                f"score {best['scores'][self.dev[0]]:.5f} -> {summ['scores'][self.dev[0]]:.5f} "
+                                f"(gap to #1 {summ['mean_gap']:+.5f})")
+                    self.state["step"] = 1
+                    self.save()
+                    continue
+                top = []  # nothing improved: fall through to the step-widening below
             if not top and self.args.mode == "global":
                 self.event("iteration", iteration=it, result="no global sample beat the best on the slices")
                 self.log("iteration", iteration=it, result="global: no sample beat the best", best=best["label"])
@@ -440,6 +469,8 @@ def main():
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--mode", choices=["single", "global"], default="single",
                     help="single = one change per candidate; global = whole random configs (exploration)")
+    ap.add_argument("--focus-round", default=None,
+                    help="optimise on this one full round (fast feedback); results go to configs/gatk-focus.conf, not live")
     ap.add_argument("--reset", action="store_true",
                     help="forget the saved best and pick the best of --start on the dev rounds")
     ap.add_argument("--stop-when-converged", action="store_true",
