@@ -51,7 +51,7 @@ LADDERS = {
     "assembly_region_padding": [50, 100, 150, 200, 300],
     "max_assembly_region_size": [200, 300, 400, 600],
     "dont_use_soft_clipped_bases": [False, True],
-    "pair_hmm_gap_continuation_penalty": [5, 10, 15, 25],
+    "pair_hmm_gap_continuation_penalty": [5, 10, 15, 20, 25, 30],
     "min_dangling_branch_length": [2, 4, 6, 8],
     "active_probability_threshold": [0.001, 0.002, 0.005, 0.01, 0.02],
     # Indel-assembly settings, added after the first full-system check showed
