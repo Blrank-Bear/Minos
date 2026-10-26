@@ -15,7 +15,7 @@ Results land in data/replays/results.jsonl like any replay, and already-scored
 (config, round) pairs are reused, so a stopped run resumes where it left off.
 
 Usage (inside WSL, from the project root):
-  .venv/bin/python scripts/tune.py [--workers 5] [--plan default] [--base configs/stock-gatk.conf]
+  .venv/bin/python scripts/tune.py [--workers 1] [--plan default] [--base configs/stock-gatk.conf]
 """
 import argparse
 import hashlib
@@ -491,7 +491,7 @@ def main():
                     help="'screen' = screen every single change first, then descend in order of gain")
     ap.add_argument("--rounds", nargs="+", default=DEV_ROUNDS)
     ap.add_argument("--screen-rounds", nargs="+", default=SCREEN_ROUNDS)
-    ap.add_argument("--workers", type=int, default=5)
+    ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--memory-gb", type=int, default=6)
     ap.add_argument("--resume", action="store_true", help="continue from data/tune/state.json")

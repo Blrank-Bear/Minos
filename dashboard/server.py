@@ -550,7 +550,7 @@ def tune_start(body):
     state = read_json(TUNE_STATE, {}) or {}
     if state and pid_alive(state.get("pid")) and state.get("status") in ("running", "starting", "stopping"):
         return {"error": "tuner already running"}, 409
-    cmd = [str(PY), "scripts/tune.py", "--workers", str(int(body.get("workers", 6))), "--deploy"]
+    cmd = [str(PY), "scripts/tune.py", "--workers", "1", "--deploy"]  # one test at a time (user rule)
     if body.get("resume", True) and state.get("best"):
         cmd.append("--resume")
         if body.get("new_pass"):
@@ -566,7 +566,7 @@ def autopilot_start(body):
     ap = read_json(TUNE / "autopilot.json", {}) or {}
     if ap and pid_alive(ap.get("pid")) and ap.get("status") in ("running", "starting", "stopping"):
         return {"error": "autopilot already running"}, 409
-    cmd = [str(PY), "scripts/autopilot.py", "--workers", str(int(body.get("workers", 9)))]
+    cmd = [str(PY), "scripts/autopilot.py", "--workers", "1"]  # one test at a time (user rule)
     if body.get("start"):
         cmd += ["--start", *[str(Path(s)) for s in body["start"]]]
     if body.get("reset"):

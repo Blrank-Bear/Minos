@@ -4,6 +4,10 @@
 - Keep all work inside this folder: session data, temp files (`.tmp/`), caches (`.cache/`), miner state (`state/`). Do not use the system temp dir or the scratchpad.
 - Commit to git after each completed change in this repo.
 - Never create wallets, register, stake or transfer TAO without the user's explicit go-ahead.
+- **Never run tests in parallel.** One replay at a time (`--workers 1` everywhere; the dashboard forces it).
+- Tuning method (user's): optimise on ONE chosen test round with fast feedback, one change per test,
+  log every test in detail; when that round reaches #1 level, check the whole system (other rounds)
+  and break any shortcoming down into new single-change tests.
 
 ## Layout
 - `minos_subnet/` – upstream clone of minos-protocol/minos_subnet. Gitignored here; keep it unmodified so `git pull` / auto-update work.

@@ -5,5 +5,5 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 mkdir -p data/tune
-setsid nohup .venv/bin/python scripts/tune.py --workers 6 --resume --deploy "$@" >> data/tune/tuner.log 2>&1 < /dev/null &
+setsid nohup .venv/bin/python scripts/tune.py --workers 1 --resume --deploy "$@" >> data/tune/tuner.log 2>&1 < /dev/null &
 echo "tuner started (pid $!)"

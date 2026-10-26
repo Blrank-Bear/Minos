@@ -17,7 +17,7 @@ for spec in "$@"; do
     k="${kv%%=*}"; v="${kv#*=}"
     if grep -q "^$k=" "$conf"; then sed -i "s|^$k=.*|$k=$v|" "$conf"; else echo "$k=$v" >> "$conf"; fi
   done
-  ( .venv/bin/python scripts/score_round.py "data/rounds/$round" --config "$conf" --label "probe-$name" \
-      --threads 2 --memory-gb 6 2>&1 | grep -E 'RESULT|PLACEMENT|ERROR' | sed "s/^/[$name] /" ) &
+  .venv/bin/python scripts/score_round.py "data/rounds/$round" --config "$conf" --label "probe-$name" \
+      --threads 2 --memory-gb 6 2>&1 | grep -E 'RESULT|PLACEMENT|ERROR' | sed "s/^/[$name] /"
 done
 wait

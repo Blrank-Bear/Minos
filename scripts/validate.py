@@ -41,7 +41,7 @@ def finalized_rounds(exclude):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("configs", nargs="+", type=Path)
-    ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--memory-gb", type=int, default=6)
     ap.add_argument("--include-dev", action="store_true", help="also replay the tuner's dev rounds")

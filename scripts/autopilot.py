@@ -353,11 +353,32 @@ class Autopilot:
                 for param, new in self.single_changes(best["options"]):
                     opts = {**best["options"], param: new}
                     cands.append((f"ap-{it:03d}-{param}={new}", opts, param, best["options"].get(param), new))
-            screened = self.evaluate([(l, o) for l, o, *_ in cands], self.screen,
-                                     f"iteration {it}: screening {len(cands)} {'global samples' if self.args.mode == 'global' else 'single changes'}")
+            base = self.state["best"]["scores"]
+            if self.focus:
+                # Wave by wave (one wave = `workers` tests, ~5 min): stop at the first
+                # wave that beats the best so it can be accepted immediately. Params
+                # that helped before go first.
+                gains = self.state.setdefault("param_gain", {})
+                cands.sort(key=lambda c: -gains.get(c[2], 0.0))
+                w = self.args.workers
+                waves = (len(cands) + w - 1) // w
+                screened = {}
+                for i in range(0, len(cands), w):
+                    wave = cands[i:i + w]
+                    res = self.evaluate([(l, o) for l, o, *_ in wave], self.screen,
+                                        f"iteration {it}: wave {i // w + 1}/{waves} ({len(wave)} single changes)")
+                    screened.update(res)
+                    if self.stop:
+                        break
+                    if any(all(s["scores"].get(r, -9) > base[r] + tune.MIN_IMPROVEMENT for r in self.screen)
+                           for s in res.values()):
+                        break
+                cands = [c for c in cands if c[1] in screened]
+            else:
+                screened = self.evaluate([(l, o) for l, o, *_ in cands], self.screen,
+                                         f"iteration {it}: screening {len(cands)} {'global samples' if self.args.mode == 'global' else 'single changes'}")
             if self.stop:
                 break
-            base = self.state["best"]["scores"]
             ranked = []
             for label, opts, param, old, new in cands:
                 s = screened[label]
@@ -367,6 +388,9 @@ class Autopilot:
                          per_slice={r: s["scores"].get(r) for r in self.screen})
                 if expected is not None:
                     ranked.append((expected, label, opts, param, old, new))
+                    if expected > 0 and param != "(global)":
+                        g = self.state.setdefault("param_gain", {})
+                        g[param] = g.get(param, 0.0) + expected
             ranked.sort(key=lambda x: -x[0])
             # Skip candidates that already failed 8-round confirmation against this
             # best; otherwise the same cached winners are re-confirmed forever.
@@ -463,7 +487,7 @@ class Autopilot:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--start", nargs="+", default=[str(tune.BEST_OUT)])
-    ap.add_argument("--workers", type=int, default=9)
+    ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--batch", type=int, default=18)
     ap.add_argument("--mutate", type=float, default=0.25)
     ap.add_argument("--seed", type=int, default=7)

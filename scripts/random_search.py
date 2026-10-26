@@ -49,7 +49,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--round", required=True)
     ap.add_argument("--n", type=int, default=40)
-    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--base", default=str(ROOT / "configs" / "stock-gatk.conf"))
     ap.add_argument("--mutate", type=float, default=1.0,
