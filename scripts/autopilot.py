@@ -373,7 +373,7 @@ class Autopilot:
                     if any(all(s["scores"].get(r, -9) > base[r] + tune.MIN_IMPROVEMENT for r in self.screen)
                            for s in res.values()):
                         break
-                cands = [c for c in cands if c[1] in screened]
+                cands = [c for c in cands if c[0] in screened]
             else:
                 screened = self.evaluate([(l, o) for l, o, *_ in cands], self.screen,
                                          f"iteration {it}: screening {len(cands)} {'global samples' if self.args.mode == 'global' else 'single changes'}")
