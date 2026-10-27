@@ -397,6 +397,12 @@ class Autopilot:
                     res = self.evaluate([(l, o) for l, o, *_ in wave], self.screen,
                                         f"iteration {it}: wave {i // w + 1}/{waves} ({len(wave)} single changes)")
                     screened.update(res)
+                    for label, opts, param, old, new in wave:  # log each test as soon as it is done
+                        sc = res[label]["scores"]
+                        d = [sc[r] - base[r] for r in self.screen if r in sc and r in base]
+                        self.log("screen", iteration=it, label=label, param=param, old=old, new=new,
+                                 expected_delta=sum(d) / len(d) if len(d) == len(self.screen) else None,
+                                 per_slice={r: sc.get(r) for r in self.screen})
                     if self.stop:
                         break
                     hits = [c for c in wave if tune.opts_hash(c[1]) not in rejected
@@ -428,8 +434,9 @@ class Autopilot:
                 s = screened[label]
                 diffs = [s["scores"][r] - base[r] for r in s["scores"] if r in base]
                 expected = sum(diffs) / len(diffs) if len(diffs) == len(self.screen) else None
-                self.log("screen", iteration=it, label=label, param=param, old=old, new=new, expected_delta=expected,
-                         per_slice={r: s["scores"].get(r) for r in self.screen})
+                if not self.focus:  # focus mode logged it per wave already
+                    self.log("screen", iteration=it, label=label, param=param, old=old, new=new, expected_delta=expected,
+                             per_slice={r: s["scores"].get(r) for r in self.screen})
                 if expected is not None:
                     ranked.append((expected, label, opts, param, old, new))
                     if expected <= tune.MIN_IMPROVEMENT:
