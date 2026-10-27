@@ -1,0 +1,1 @@
+2026-10-27T00:48:57Z slice screening dropped on chr13: 3/3 slice winners lost on the full round (BQ25->26 +0.00069/-0.00036, BQthr18->20 +0.00134/-0.00015, mismap35->40 +0.00060/-0.00033)
