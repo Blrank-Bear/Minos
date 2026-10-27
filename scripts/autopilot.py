@@ -111,6 +111,11 @@ class Autopilot:
         self.state = {"status": "starting", "pid": os.getpid(), "started": tune.now(), "iteration": prev.get("iteration", 0),
                       "best": prev.get("best"), "history": prev.get("history", []), "phase": None, "batch": [],
                       "mode": args.mode}
+        # Keep what the loop has learned (test counts, gains, recent losses, rejects,
+        # momentum, ladder step) across restarts; --reset starts it afresh.
+        for k in ("param_tests", "param_gain", "losses", "rejected", "accepts", "last_accept", "step", "prev_best_opts"):
+            if k in prev:
+                self.state[k] = prev[k]
         self.save()
 
     def save(self):
