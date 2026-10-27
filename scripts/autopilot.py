@@ -62,7 +62,7 @@ LADDERS = {
     "max_alternate_alleles": [2, 3, 6, 10],
     # added 2026-10-27: only ever tried on 3 slices before, never on full rounds
     "indel_heterozygosity": [0.00001, 0.00005, 0.000125, 0.0003, 0.0005, 0.001],
-    "max_reads_per_alignment_start": [0, 25, 50, 100, 200],
+    # max_reads_per_alignment_start: no effect at this coverage (25/100 identical to 50 on chr12+chr13)
     "pruning_lod_threshold": [1.0, 1.5, 2.302585, 3.0, 4.0],
     "adaptive_pruning_initial_error_rate": [0.0001, 0.0005, 0.001, 0.003, 0.01],
     "min_assembly_region_size": [25, 50, 75, 100],
