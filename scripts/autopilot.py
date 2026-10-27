@@ -67,6 +67,7 @@ LADDERS = {
 # best on the same slices are used from them; confirmation uses full rounds.
 SCREEN_BASE_ROUNDS = ["20261024T154600Z", "20261024T105800Z", "20261024T121000Z"]
 SLICE_MB = 2
+COOLDOWN = 3  # focus mode: a change that lost is tried last until this many later accepts
 
 
 def _slice(rd):
@@ -363,8 +364,27 @@ class Autopilot:
                 # Wave by wave (one wave = `workers` tests, ~5 min): stop at the first
                 # wave that beats the best so it can be accepted immediately. Params
                 # that helped before go first.
+                # Order so a winner turns up early: (1) keep going in the direction of
+                # the last accepted change, (2) params that helped before, (3) changes
+                # that already lost recently (within COOLDOWN accepts) go last.
                 gains = self.state.setdefault("param_gain", {})
-                cands.sort(key=lambda c: -gains.get(c[2], 0.0))
+                losses = self.state.setdefault("losses", {})
+                accepts = self.state.get("accepts", 0)
+                last = self.state.get("last_accept")
+
+                def momentum(c):
+                    if not last or c[2] != last[0]:
+                        return False
+                    try:
+                        return (c[4] - c[3]) * (last[2] - last[1]) > 0
+                    except TypeError:
+                        return False
+
+                def cooled(c):
+                    k = f"{c[2]}={c[4]}"
+                    return k in losses and accepts - losses[k] < COOLDOWN
+
+                cands.sort(key=lambda c: (not momentum(c), cooled(c), -gains.get(c[2], 0.0)))
                 w = self.args.workers
                 waves = (len(cands) + w - 1) // w
                 screened = {}
@@ -410,6 +430,8 @@ class Autopilot:
                          per_slice={r: s["scores"].get(r) for r in self.screen})
                 if expected is not None:
                     ranked.append((expected, label, opts, param, old, new))
+                    if expected <= tune.MIN_IMPROVEMENT:
+                        self.state.setdefault("losses", {})[f"{param}={new}"] = self.state.get("accepts", 0)
                     if expected > 0 and param != "(global)":
                         g = self.state.setdefault("param_gain", {})
                         g[param] = g.get(param, 0.0) + expected
@@ -441,6 +463,8 @@ class Autopilot:
                                 f"score {best['scores'][self.dev[0]]:.5f} -> {summ['scores'][self.dev[0]]:.5f} "
                                 f"(gap to #1 {summ['mean_gap']:+.5f})")
                     self.state["step"] = 1
+                    self.state["accepts"] = self.state.get("accepts", 0) + 1
+                    self.state["last_accept"] = [win[3], win[4], win[5]]
                     self.save()
                     continue
                 top = []  # nothing improved: fall through to the step-widening below
