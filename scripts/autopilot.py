@@ -60,6 +60,12 @@ LADDERS = {
     "recover_all_dangling_branches": [False, True],
     "max_num_haplotypes_in_population": [32, 64, 128, 256],
     "max_alternate_alleles": [2, 3, 6, 10],
+    # added 2026-10-27: only ever tried on 3 slices before, never on full rounds
+    "indel_heterozygosity": [0.00001, 0.00005, 0.000125, 0.0003, 0.0005, 0.001],
+    "max_reads_per_alignment_start": [0, 25, 50, 100, 200],
+    "pruning_lod_threshold": [1.0, 1.5, 2.302585, 3.0, 4.0],
+    "adaptive_pruning_initial_error_rate": [0.0001, 0.0005, 0.001, 0.003, 0.01],
+    "min_assembly_region_size": [25, 50, 75, 100],
 }
 
 # Screening runs on a SLICE_MB slice of each screening round (GATK time scales
@@ -387,7 +393,8 @@ class Autopilot:
 
                 # Undoing the last accepted change is already known to lose on the full round.
                 cands = [c for c in cands if not (last and c[2] == last[0] and c[4] == last[1])]
-                cands.sort(key=lambda c: (not momentum(c), cooled(c), -gains.get(c[2], 0.0)))
+                tests = self.state.setdefault("param_tests", {})
+                cands.sort(key=lambda c: (not momentum(c), cooled(c), -gains.get(c[2], 0.0), tests.get(c[2], 0)))
                 w = self.args.workers
                 waves = (len(cands) + w - 1) // w
                 screened = {}
@@ -399,6 +406,7 @@ class Autopilot:
                                         f"iteration {it}: wave {i // w + 1}/{waves} ({len(wave)} single changes)")
                     screened.update(res)
                     for label, opts, param, old, new in wave:  # log each test as soon as it is done
+                        tests[param] = tests.get(param, 0) + 1
                         sc = res[label]["scores"]
                         d = [sc[r] - base[r] for r in self.screen if r in sc and r in base]
                         self.log("screen", iteration=it, label=label, param=param, old=old, new=new,
