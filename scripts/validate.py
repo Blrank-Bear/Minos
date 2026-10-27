@@ -59,7 +59,12 @@ def main():
     entries = []
     for cfg in args.configs:
         opts = tune.parse_conf(cfg, defs)
-        entries.append({"name": cfg.stem, "file": str(cfg), "hash": tune.opts_hash(opts), "done": 0,
+        # score_round records the options as the miner loads them: "80" stays an int for a
+        # float param, so its hash can differ from ours; look results up under both.
+        literal = {k: int(v) if isinstance(v, float) and v.is_integer() and f"{k}={int(v)}" in cfg.read_text().split()
+                   else v for k, v in opts.items()}
+        entries.append({"name": cfg.stem, "file": str(cfg), "hash": tune.opts_hash(opts),
+                        "alt_hash": tune.opts_hash(literal), "done": 0,
                         "total": len(rounds), "per_round": {}})
     state["configs"] = entries
 
@@ -79,7 +84,7 @@ def main():
     cached = tune.Tuner.cached.__get__(runner)
 
     def summarise(e):
-        have = cached(e["hash"], rounds)
+        have = cached(e["hash"], rounds) or cached(e["alt_hash"], rounds)
         e["done"] = len(have)
         e["per_round"] = {r: {k: v.get(k) for k in ("score", "gap", "rank", "field", "top1", "calling_seconds")}
                           for r, v in have.items()}
@@ -97,7 +102,7 @@ def main():
 
     tasks = []
     for e, cfg in zip(entries, args.configs):
-        have = cached(e["hash"], rounds)
+        have = cached(e["hash"], rounds) or cached(e["alt_hash"], rounds)
         tasks += [(cfg, e, r) for r in rounds if r not in have]
         summarise(e)
     save()
