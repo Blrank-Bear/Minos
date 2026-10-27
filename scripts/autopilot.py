@@ -394,7 +394,7 @@ class Autopilot:
                 # Undoing the last accepted change is already known to lose on the full round.
                 cands = [c for c in cands if not (last and c[2] == last[0] and c[4] == last[1])]
                 tests = self.state.setdefault("param_tests", {})
-                cands.sort(key=lambda c: (not momentum(c), cooled(c), -gains.get(c[2], 0.0), tests.get(c[2], 0)))
+                cands.sort(key=lambda c: (not momentum(c), tests.get(c[2], 0) > 0, cooled(c), -gains.get(c[2], 0.0), tests.get(c[2], 0)))
                 w = self.args.workers
                 waves = (len(cands) + w - 1) // w
                 screened = {}
