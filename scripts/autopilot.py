@@ -64,7 +64,7 @@ LADDERS = {
     "indel_heterozygosity": [0.00001, 0.00005, 0.000125, 0.0003, 0.0005, 0.001],
     # max_reads_per_alignment_start: no effect at this coverage (25/100 identical to 50 on chr12+chr13)
     # pruning_lod_threshold / adaptive_pruning_initial_error_rate: only used with --adaptive-pruning (not whitelisted) -> no effect
-    "min_assembly_region_size": [25, 50, 75, 100],
+    # min_assembly_region_size: no effect (25/75 identical to 50 on chr12+chr13)
 }
 
 # Screening runs on a SLICE_MB slice of each screening round (GATK time scales
