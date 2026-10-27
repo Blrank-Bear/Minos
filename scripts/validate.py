@@ -84,7 +84,7 @@ def main():
     cached = tune.Tuner.cached.__get__(runner)
 
     def summarise(e):
-        have = cached(e["hash"], rounds) or cached(e["alt_hash"], rounds)
+        have = {**cached(e["alt_hash"], rounds), **cached(e["hash"], rounds)}
         e["done"] = len(have)
         e["per_round"] = {r: {k: v.get(k) for k in ("score", "gap", "rank", "field", "top1", "calling_seconds")}
                           for r, v in have.items()}
@@ -102,7 +102,7 @@ def main():
 
     tasks = []
     for e, cfg in zip(entries, args.configs):
-        have = cached(e["hash"], rounds) or cached(e["alt_hash"], rounds)
+        have = {**cached(e["alt_hash"], rounds), **cached(e["hash"], rounds)}
         tasks += [(cfg, e, r) for r in rounds if r not in have]
         summarise(e)
     save()

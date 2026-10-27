@@ -88,13 +88,14 @@ class Autopilot:
         self.defs = tune.param_defs()
         self.stop = False
         self.rng = random.Random(args.seed)
-        self.dev = [args.focus_round] if args.focus_round else tune.DEV_ROUNDS
+        # --focus-round accepts a comma list: a change must raise the mean over those rounds.
+        self.dev = args.focus_round.split(",") if args.focus_round else tune.DEV_ROUNDS
         # Focus mode: test directly on one full round (fast feedback); otherwise
         # screen on slices and confirm on the 8 dev rounds.
         self.focus = bool(args.focus_round)
         # --focus-slice: screen on a SLICE_MB slice of the focus round (~3x faster)
         # and confirm each slice winner on the full focus round before accepting.
-        self.focus_slice = self.focus and args.focus_slice
+        self.focus_slice = self.focus and args.focus_slice and len(self.dev) == 1
         if self.focus_slice:
             SLICES.setdefault(args.focus_round, _slice(args.focus_round))
         self.screen = ([f"{args.focus_round}@slice"] if self.focus_slice else self.dev) if self.focus else SCREEN_ROUNDS
@@ -284,7 +285,7 @@ class Autopilot:
         self.state["best"] = {"label": label, "options": opts, "hash": tune.opts_hash(opts), "since": tune.now(), **summ}
         out = FOCUS_OUT if self.focus else tune.BEST_OUT
         tune.write_conf(out, opts, f"GATK config tuned by scripts/autopilot.py ({label})\n"
-                        f"{'focus round ' + self.dev[0] if self.focus else 'dev'} mean gap to #1 {summ['mean_gap']:+.5f}, "
+                        f"{'focus round ' + ','.join(self.dev) if self.focus else 'dev'} mean gap to #1 {summ['mean_gap']:+.5f}, "
                         f"mean rank {summ['mean_rank']:.1f} over {len(self.dev)} rounds ({tune.now()})")
         if not self.focus:  # focus results are verified on other rounds before going live
             live = tune.REPO / "configs" / "gatk.conf"
@@ -406,7 +407,8 @@ class Autopilot:
                     if self.stop:
                         break
                     hits = [c for c in wave if tune.opts_hash(c[1]) not in rejected
-                            and all(res[c[0]]["scores"].get(r, -9) > base[r] + tune.MIN_IMPROVEMENT for r in self.screen)]
+                            and sum(res[c[0]]["scores"].get(r, -9) - base[r] for r in self.screen) / len(self.screen)
+                            > tune.MIN_IMPROVEMENT]
                     if hits and not self.focus_slice:
                         break
                     for label, opts, param, old, new in hits:  # slice winner -> check it on the full round
@@ -468,9 +470,9 @@ class Autopilot:
                              mean_rank=summ["mean_rank"], max_calling_seconds=summ["max_calling_seconds"],
                              per_round=summ["scores"], fp_delta=0, fn_delta=0, class_delta={}, matched_expectation=True)
                     self.accept(win[1], dict(win[2]), summ,
-                                f"focus round {self.dev[0]}: one change {win[3]}: {win[4]} -> {win[5]}; "
-                                f"score {best['scores'][self.dev[0]]:.5f} -> {summ['scores'][self.dev[0]]:.5f} "
-                                f"(gap to #1 {summ['mean_gap']:+.5f})")
+                                f"focus round {','.join(self.dev)}: one change {win[3]}: {win[4]} -> {win[5]}; "
+                                + ", ".join(f"{r} {best['scores'][r]:.5f} -> {summ['scores'][r]:.5f}" for r in self.dev)
+                                + f" (mean gap to #1 {summ['mean_gap']:+.5f})")
                     self.state["step"] = 1
                     self.state["accepts"] = self.state.get("accepts", 0) + 1
                     self.state["last_accept"] = [win[3], win[4], win[5]]
