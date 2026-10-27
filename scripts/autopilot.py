@@ -91,7 +91,12 @@ class Autopilot:
         # Focus mode: test directly on one full round (fast feedback); otherwise
         # screen on slices and confirm on the 8 dev rounds.
         self.focus = bool(args.focus_round)
-        self.screen = self.dev if self.focus else SCREEN_ROUNDS
+        # --focus-slice: screen on a SLICE_MB slice of the focus round (~3x faster)
+        # and confirm each slice winner on the full focus round before accepting.
+        self.focus_slice = self.focus and args.focus_slice
+        if self.focus_slice:
+            SLICES.setdefault(args.focus_round, _slice(args.focus_round))
+        self.screen = ([f"{args.focus_round}@slice"] if self.focus_slice else self.dev) if self.focus else SCREEN_ROUNDS
         prev = json.loads(STATE.read_text()) if STATE.exists() else {}
         if args.reset:  # choose a new start point among --start; keep iteration count and history
             prev = {"iteration": prev.get("iteration", 0), "history": prev.get("history", [])}
@@ -363,6 +368,8 @@ class Autopilot:
                 w = self.args.workers
                 waves = (len(cands) + w - 1) // w
                 screened = {}
+                self.full_ok = set()
+                rejected = set(self.state.setdefault("rejected", {}).get(best["hash"], []))
                 for i in range(0, len(cands), w):
                     wave = cands[i:i + w]
                     res = self.evaluate([(l, o) for l, o, *_ in wave], self.screen,
@@ -370,8 +377,23 @@ class Autopilot:
                     screened.update(res)
                     if self.stop:
                         break
-                    if any(all(s["scores"].get(r, -9) > base[r] + tune.MIN_IMPROVEMENT for r in self.screen)
-                           for s in res.values()):
+                    hits = [c for c in wave if tune.opts_hash(c[1]) not in rejected
+                            and all(res[c[0]]["scores"].get(r, -9) > base[r] + tune.MIN_IMPROVEMENT for r in self.screen)]
+                    if hits and not self.focus_slice:
+                        break
+                    for label, opts, param, old, new in hits:  # slice winner -> check it on the full round
+                        full = self.evaluate([(label, opts)], self.dev, f"iteration {it}: confirming {label} on the full round")
+                        rd = self.dev[0]
+                        d = full[label]["scores"].get(rd, -9) - base[rd]
+                        sk = self.screen[0]
+                        self.log("slice_confirm", iteration=it, label=label, param=param, old=old, new=new,
+                                 slice_delta=res[label]["scores"][sk] - base[sk], full_delta=d, accepted=d > tune.MIN_IMPROVEMENT)
+                        if d > tune.MIN_IMPROVEMENT:
+                            self.full_ok.add(label)
+                            break
+                        self.state["rejected"].setdefault(best["hash"], []).append(tune.opts_hash(opts))
+                        rejected.add(tune.opts_hash(opts))
+                    if self.full_ok or self.stop:
                         break
                 cands = [c for c in cands if c[0] in screened]
             else:
@@ -403,9 +425,12 @@ class Autopilot:
             if self.focus:
                 # The candidate was scored on the full focus round itself: no
                 # separate confirmation step, accept the best improvement now.
-                win = next((c for c in ranked if c[0] > tune.MIN_IMPROVEMENT), None)
+                win = next((c for c in ranked if c[0] > tune.MIN_IMPROVEMENT
+                            and (not self.focus_slice or c[1] in self.full_ok)), None)
                 if win:
                     summ = self.summary(tune.opts_hash(win[2]), self.dev)
+                    if self.focus_slice:  # report the full-round gain, not the slice one
+                        win = (summ["scores"][self.dev[0]] - best["scores"][self.dev[0]], *win[1:])
                     hist.update(winner=win[1], winner_gap=summ["mean_gap"], accepted=True)
                     self.log("confirm", iteration=it, label=win[1], param=win[3], old=win[4], new=win[5],
                              expected_delta=win[0], actual_gap_delta=win[0], mean_gap=summ["mean_gap"],
@@ -495,6 +520,8 @@ def main():
                     help="single = one change per candidate; global = whole random configs (exploration)")
     ap.add_argument("--focus-round", default=None,
                     help="optimise on this one full round (fast feedback); results go to configs/gatk-focus.conf, not live")
+    ap.add_argument("--focus-slice", action="store_true",
+                    help="with --focus-round: screen on a slice of it, confirm slice winners on the full round")
     ap.add_argument("--reset", action="store_true",
                     help="forget the saved best and pick the best of --start on the dev rounds")
     ap.add_argument("--stop-when-converged", action="store_true",

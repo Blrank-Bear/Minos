@@ -573,6 +573,8 @@ def autopilot_start(body):
         cmd.append("--reset")
     if body.get("focus_round"):
         cmd += ["--focus-round", Path(str(body["focus_round"])).name]
+        if body.get("focus_slice"):
+            cmd.append("--focus-slice")
     if body.get("mode") in ("single", "global"):
         cmd += ["--mode", body["mode"]]
     if body.get("batch"):
