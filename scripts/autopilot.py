@@ -72,6 +72,7 @@ LADDERS = {
 # best on the same slices are used from them; confirmation uses full rounds.
 SCREEN_BASE_ROUNDS = ["20261024T154600Z", "20261024T105800Z", "20261024T121000Z"]
 SLICE_MB = 2
+DEPLOY_MAX_CALLING = 800  # s; validator kills calling at 900 s
 COOLDOWN = 3  # focus mode: a change that lost is tried last until this many later accepts
 
 
@@ -294,26 +295,35 @@ class Autopilot:
     def accept(self, label, opts, summ, why):
         self.state["best"] = {"label": label, "options": opts, "hash": tune.opts_hash(opts), "since": tune.now(), **summ}
         out = FOCUS_OUT if self.focus else tune.BEST_OUT
+        # A focus run over all dev rounds IS the whole-system check: deploy its accepts,
+        # as long as calling stays well inside the validator's 900 s limit.
+        deploy = (not self.focus or set(self.dev) == set(tune.DEV_ROUNDS)) and             (summ.get("max_calling_seconds") or 0) < DEPLOY_MAX_CALLING
         tune.write_conf(out, opts, f"GATK config tuned by scripts/autopilot.py ({label})\n"
                         f"{'focus round ' + ','.join(self.dev) if self.focus else 'dev'} mean gap to #1 {summ['mean_gap']:+.5f}, "
                         f"mean rank {summ['mean_rank']:.1f} over {len(self.dev)} rounds ({tune.now()})")
-        if not self.focus:  # focus results are verified on other rounds before going live
+        if deploy:  # partial-focus results are verified on the other rounds before going live
+            if out != tune.BEST_OUT:
+                tune.BEST_OUT.write_bytes(out.read_bytes())
             live = tune.REPO / "configs" / "gatk.conf"
+            backups = tune.ROOT / "state" / "config_backups"
+            backups.mkdir(parents=True, exist_ok=True)
+            if live.exists():
+                (backups / f"gatk-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.conf").write_bytes(live.read_bytes())
             live.write_bytes(tune.BEST_OUT.read_bytes())
         with tune.JOURNAL.open("a") as fh:
             fh.write(json.dumps({"ts": tune.now(), "tag": "tuning", "text": f"Autopilot accepted {label}: {why}."
-                                 + ("" if self.focus else " Deployed as live config.")}) + "\n")
-        self.event("accept", label=label, mean_gap=summ["mean_gap"], mean_rank=summ["mean_rank"], why=why)
+                                 + (" Deployed as live config." if deploy else "")}) + "\n")
+        self.event("accept", label=label, deployed=deploy, mean_gap=summ["mean_gap"], mean_rank=summ["mean_rank"], why=why)
         changes = ", ".join(f"{k}={v}" for k, v in opts.items() if v != self.state.get("prev_best_opts", {}).get(k))
-        where = ("Focus-round result: NOT deployed; verify on the other rounds first."
-                 if self.focus else "Deployed as the live miner config.")
+        where = ("Deployed as the live miner config." if deploy
+                 else "Focus-round result: NOT deployed; verify on the other rounds first.")
         msg = (f"Autopilot{' (focus)' if self.focus else ''}: new best config ({label})\n\n{why}\n"
                f"mean rank {summ['mean_rank']:.1f}, max calling {summ['max_calling_seconds']:.0f} s, "
                f"{len(self.dev)} round(s).\nChanges vs previous best: {changes or 'n/a'}\n{where}\n\n"
                "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
         # The dashboard polls git, so .git/index.lock can be briefly taken: retry.
         for attempt in range(10):
-            add = subprocess.run(["git", "add", str(out)], cwd=tune.ROOT, capture_output=True, text=True)
+            add = subprocess.run(["git", "add", str(out), str(tune.BEST_OUT)], cwd=tune.ROOT, capture_output=True, text=True)
             com = subprocess.run(["git", "commit", "-q", "-m", msg], cwd=tune.ROOT, capture_output=True, text=True)
             if add.returncode == 0 and com.returncode == 0:
                 self.event("commit", label=label)
