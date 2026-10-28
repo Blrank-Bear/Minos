@@ -1,1 +1,11 @@
 2026-10-27T00:48:57Z slice screening dropped on chr13: 3/3 slice winners lost on the full round (BQ25->26 +0.00069/-0.00036, BQthr18->20 +0.00134/-0.00015, mismap35->40 +0.00060/-0.00033)
+2026-10-28 FP analysis, live config (ap-112) on 214600Z (score 0.7925, #1 0.8132):
+  - Leaderboard: top-3 miners identical score on every round (same config). Their mutation SNP/indel F1
+    is often LOWER than ours (214600Z: 0.987/0.947 vs ours 0.995/0.972) -> they win on region-wide FPs (germline term).
+  - Ours: 2125 FP (fp/target 3.08, germline 0.68), 1268 FN. 96% of FPs are extra calls (no truth record).
+  - FPs look real: QUAL p50 312, MQ 60, GQ p50 81. QUAL cut-off simulation: best +0.003 at QUAL 100.
+  - FPs evenly spread (~7% of calls in every 50 kb window); 13% are >1 kb from any truth record (TP: 3%).
+  - FPs are clustered: 34% have another call within 10 bp (TP: 7-8%).
+  - Missed SNPs: ALT reads mostly MAPQ 40 (TP: MAPQ 60). MAPQ 40 probe: FN 1268->853, FP +67, score 0.7914 (worse):
+    SNP recall barely counts (SNP classes 20% of core weight), FPs cost germline.
+  - Configs are validator-only and salted-committed on chain; not recoverable (by design).
