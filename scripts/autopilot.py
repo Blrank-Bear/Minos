@@ -59,7 +59,7 @@ LADDERS = {
     # ~90% of the lost points are indels (1 bp: 0.057, 8+ bp: 0.044 of score).
     "recover_all_dangling_branches": [False, True],
     "max_num_haplotypes_in_population": [32, 64, 128, 256],
-    "max_alternate_alleles": [2, 3, 6, 10],
+    # max_alternate_alleles: no effect (2/3/6 identical to 10 on every round tested)
     # added 2026-10-27: only ever tried on 3 slices before, never on full rounds
     "indel_heterozygosity": [0.00001, 0.00005, 0.000125, 0.0003, 0.0005, 0.001],
     # max_reads_per_alignment_start: no effect at this coverage (25/100 identical to 50 on chr12+chr13)
