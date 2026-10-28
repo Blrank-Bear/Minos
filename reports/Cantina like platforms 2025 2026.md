@@ -16,6 +16,26 @@ This table gives the full answer in one place. Sections A to F below give the ev
 | **C. Possible, unverified** | Hackers Guild, DualGuard, Secur0 | BugSecure Africa, bug.sa, OQDOPPI, BBHunt, BugStream, Kiberbastion |
 | **Wide count** (A/B + D + the E items that work like new platforms) | 3 | **7** |
 
+### Site links
+
+| Platform | Launched | Link | Access |
+|---|---|---|---|
+| CertiK Hunt | Jul 2026 | https://hunt.certik.com | Invite only |
+| CODESPECT SpecSiege | Jul 2026 | https://codespect.net (operator site; separate contest URL not found) | Apply per contest |
+| BattleChain by Cyfrin | Mar 2026 (testnet) | https://battlechain.com | Unclear |
+| Bugbop | Apr 2025 alpha / Jan 2026 public | https://bugbop.com | Open, small |
+| VulneraPro | Jun 2025 | No public URL found | Existing Oi Soluções clients |
+| Nethermind AgentArena | Jul 2025 | https://agentarena.nethermind.io | AI-agent builders |
+| Sherlock Audit Engine | Aug 2026 | https://sherlock.xyz/solutions/audit-engine | Invite, KYC + NDA |
+| Gray Swan Arena 2.0 | Oct 2026 (relaunch) | https://app.grayswan.ai/arena | Open |
+| Firedancer Bug Bounty | Oct 2026 | https://bounty.firedancer.io | Open, 1 SOL per report |
+| IssueHunt One | Jan 2026 (rebrand) | https://issuehunt.io | Japan-focused |
+| BBHunt (unverified) | 2026? | https://bbhunt.jp | Unknown |
+| BugStream (unverified) | 2026? | https://bugstream.com.ua | Unknown |
+| OQDOPPI (unverified) | 2026? | https://oqdoppi.uz | Unknown |
+| bug.sa (unverified) | Not live | https://bug.sa | "Coming soon" |
+| BugSecure Africa (unverified) | Soft launch 2026 | No public URL found | KYC |
+
 Classification conflicts between the research notes were settled this way:
 
 | Item | Conflict | Decision |
