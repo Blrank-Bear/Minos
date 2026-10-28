@@ -44,7 +44,7 @@ LADDERS = {
     "min_base_quality_score": [5, 10, 12, 15, 18, 20, 22, 24, 25, 26],
     "min_mapping_quality_score": [10, 20, 30, 40, 45, 50, 55, 58, 60],
     "base_quality_score_threshold": [6, 10, 15, 18, 20, 25, 30],
-    "pcr_indel_model": ["NONE", "CONSERVATIVE", "AGGRESSIVE"],
+    # pcr_indel_model: AGGRESSIVE beat NONE/CONSERVATIVE on every round tested (chr12, chr13, pair, 3-round); not re-tested
     "phred_scaled_global_read_mismapping_rate": [20, 25, 30, 35, 40, 45, 50],
     "heterozygosity": [0.0005, 0.001, 0.002, 0.003, 0.005, 0.008],
     "min_pruning": [1, 2, 3, 4],
