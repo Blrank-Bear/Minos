@@ -73,6 +73,7 @@ LADDERS = {
 SCREEN_BASE_ROUNDS = ["20261024T154600Z", "20261024T105800Z", "20261024T121000Z"]
 SLICE_MB = 2
 DEPLOY_MAX_CALLING = 800  # s; validator kills calling at 900 s
+RECENT_UNDO = 3  # focus mode: never re-test undoing one of the last N accepted changes
 COOLDOWN = 3  # focus mode: a change that lost is tried last until this many later accepts
 
 
@@ -113,7 +114,8 @@ class Autopilot:
                       "mode": args.mode}
         # Keep what the loop has learned (test counts, gains, recent losses, rejects,
         # momentum, ladder step) across restarts; --reset starts it afresh.
-        for k in ("param_tests", "param_gain", "losses", "rejected", "accepts", "last_accept", "step", "prev_best_opts"):
+        for k in ("param_tests", "param_gain", "losses", "rejected", "accepts", "last_accept", "recent_accepts",
+                  "step", "prev_best_opts"):
             if k in prev:
                 self.state[k] = prev[k]
         self.save()
@@ -405,8 +407,9 @@ class Autopilot:
                     k = f"{c[2]}={c[4]}"
                     return k in losses and accepts - losses[k] < COOLDOWN
 
-                # Undoing the last accepted change is already known to lose on the full round.
-                cands = [c for c in cands if not (last and c[2] == last[0] and c[4] == last[1])]
+                # Undoing one of the last few accepted changes is already known to lose.
+                recent = self.state.get("recent_accepts", [])[-RECENT_UNDO:] or ([last] if last else [])
+                cands = [c for c in cands if not any(c[2] == a[0] and c[4] == a[1] for a in recent)]
                 tests = self.state.setdefault("param_tests", {})
                 cands.sort(key=lambda c: (not momentum(c), tests.get(c[2], 0) > 0, cooled(c), -gains.get(c[2], 0.0), tests.get(c[2], 0)))
                 w = self.args.workers
@@ -498,6 +501,8 @@ class Autopilot:
                     self.state["step"] = 1
                     self.state["accepts"] = self.state.get("accepts", 0) + 1
                     self.state["last_accept"] = [win[3], win[4], win[5]]
+                    self.state.setdefault("recent_accepts", []).append([win[3], win[4], win[5]])
+                    self.state["recent_accepts"] = self.state["recent_accepts"][-RECENT_UNDO:]
                     self.save()
                     continue
                 top = []  # nothing improved: fall through to the step-widening below
